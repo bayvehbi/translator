@@ -144,12 +144,6 @@ class Worker:
                 self.ui_callback("Capture failed", "Could not capture screen region")
                 return
         
-        # Save debug image if enabled
-        if DEBUG_SAVE_IMAGES:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
-            debug_filename = f"{DEBUG_FOLDER}/capture_{timestamp}_{x1}_{y1}_{x2}_{y2}.png"
-            img.save(debug_filename)
-            
         # OCR
         try:
             text = pytesseract.image_to_string(img, lang=OCR_LANGS).strip()
