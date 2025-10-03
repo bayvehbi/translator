@@ -2,13 +2,14 @@
 Screen OCR & Translate — ultra‑simple, always‑on‑top UI
 
 How it works:
-- Hold the `"` key (double‑quote) and click two points on the screen.
-- The app captures the region, runs OCR, and translates to Turkish.
+- Press F8 to set top-left corner (where mouse cursor is)
+- Press F8 again to set bottom-right corner (where mouse cursor is)
+- Translation starts automatically
 - Results appear in the always‑on‑top window as "original : translation"
 
 Keys:
-- Hold  `"`  while clicking to select region
-- Press  Esc  to cancel an in‑progress selection
+- Press  F8  to set corners (first = top-left, second = bottom-right)
+- Press  Esc  to close application
 """
 from __future__ import annotations
 
@@ -42,57 +43,41 @@ class Selection:
 
 
 class CaptureController:
-    """Handles global keyboard state and mouse clicks to form a capture rectangle."""
+    """Handles global keyboard input for screen capture."""
     def __init__(self, on_region_ready):
         self.on_region_ready = on_region_ready
-        self._quote_held = False
-        self._points: list[tuple[int, int]] = []
         self._lock = threading.Lock()
-        self._kb_listener = keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
-        self._ms_listener = mouse.Listener(on_click=self._on_click)
+        self._points = []  # Store cursor positions
+        self._kb_listener = keyboard.Listener(on_press=self._on_key_press)
         self._kb_listener.start()
-        self._ms_listener.start()
 
     def stop(self):
         self._kb_listener.stop()
-        self._ms_listener.stop()
 
     def _on_key_press(self, key):
         try:
-            if isinstance(key, keyboard.KeyCode) and key.char == '"':
+            if key == keyboard.Key.f8:
+                # Get current mouse cursor position
+                import win32gui
+                cursor_pos = win32gui.GetCursorPos()
+                x, y = cursor_pos
+                
                 with self._lock:
-                    self._quote_held = True
-        except Exception:
+                    self._points.append((x, y))
+                    
+                    if len(self._points) == 2:
+                        # We have both points, create selection
+                        (x1, y1), (x2, y2) = self._points
+                        x_left, x_right = sorted([x1, x2])
+                        y_top, y_bottom = sorted([y1, y2])
+                        
+                        sel = Selection(x_left, y_top, x_right, y_bottom)
+                        threading.Thread(target=self.on_region_ready, args=(sel,), daemon=True).start()
+                        self._points.clear()  # Reset for next selection
+        except Exception as e:
             pass
-        if key == keyboard.Key.esc:
-            with self._lock:
-                self._points.clear()
         return True
 
-    def _on_key_release(self, key):
-        try:
-            if isinstance(key, keyboard.KeyCode) and key.char == '"':
-                with self._lock:
-                    self._quote_held = False
-        except Exception:
-            pass
-        return True
-
-    def _on_click(self, x, y, button, pressed):
-        if not pressed:
-            return True
-        with self._lock:
-            if not self._quote_held:
-                return True
-            self._points.append((x, y))
-            if len(self._points) == 2:
-                (x1, y1), (x2, y2) = self._points
-                self._points.clear()
-                x_left, x_right = sorted([x1, x2])
-                y_top, y_bottom = sorted([y1, y2])
-                sel = Selection(x_left, y_top, x_right, y_bottom)
-                threading.Thread(target=self.on_region_ready, args=(sel,), daemon=True).start()
-        return True
 
 
 class Worker:
@@ -175,7 +160,7 @@ class SimpleApp(tk.Tk):
         
         # Make window visible first, then we'll adjust transparency
         self.attributes('-topmost', True)
-        self.attributes('-alpha', 0.3)  # Start with 70% transparent so we can see it
+        self.attributes('-alpha', 0.8)  # 80% opaque (20% transparent) for better visibility
         self.configure(bg="#000000")
         
         # Remove window decorations for cleaner look
@@ -193,7 +178,7 @@ class SimpleApp(tk.Tk):
         self.frame = tk.Frame(self, bg="#000000")
         self.frame.pack(fill=tk.BOTH, expand=True)
         
-        # Create scrollbar for text widget
+        # Create invisible scrollbar for text widget
         self.scrollbar = tk.Scrollbar(self.frame, orient="vertical")
         
         # Create text widget with solid text but transparent background
@@ -202,26 +187,26 @@ class SimpleApp(tk.Tk):
             height=3,  # Allow up to 3 lines
             wrap=tk.WORD,  # Wrap at word boundaries
             bg="#000000",  # Black background (will be transparent)
-            fg="#00ff00",  # Solid bright green text
+            fg="#ffffff",  # Bright white text for maximum visibility
             insertbackground="#ffffff",
-            font=("Consolas", 16, "bold"),  # Even larger and bold for better visibility
+            font=("Consolas", 18, "bold"),  # Larger and bold for better visibility
             padx=0,  # No padding
             pady=0,  # No padding
             relief=tk.FLAT,  # No border
             bd=0,  # No border width
             highlightthickness=0,  # No highlight border
             selectbackground="#333333",  # Dark selection background
-            selectforeground="#00ff00",  # Green selected text
+            selectforeground="#ffffff",  # White selected text
             state=tk.DISABLED,  # Make it read-only and flat
             yscrollcommand=self.scrollbar.set  # Connect to scrollbar
         )
         
-        # Configure scrollbar
+        # Configure invisible scrollbar
         self.scrollbar.config(command=self.text_widget.yview)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Don't pack the scrollbar - keep it invisible but functional
         
-        # Pack text widget
-        self.text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Pack text widget to fill the entire frame
+        self.text_widget.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
         # Add drag functionality to move the window
         self.bind('<Button-1>', self.start_move)
@@ -230,7 +215,7 @@ class SimpleApp(tk.Tk):
         self.text_widget.bind('<B1-Motion>', self.on_move)
         
         # Initial message
-        self.text_widget.insert(tk.END, "Hold \" and click two points to capture text...")
+        self.text_widget.insert(tk.END, "Press F8 at top-left corner, then F8 at bottom-right corner...")
         
         # Worker & controller
         self.worker = Worker(self._on_result)

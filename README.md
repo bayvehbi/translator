@@ -21,7 +21,7 @@ A lightweight, always-on-top screen OCR and translation tool that captures text 
 ### Option 1: Download Executable (Recommended)
 1. Download `OCR_Translator.exe` from the [Releases](https://github.com/yourusername/ocr-translator/releases) page
 2. Double-click to run (no installation required)
-3. Hold `"` key and drag to capture text from screen
+3. Press `F8` at top-left corner, then `F8` at bottom-right corner to capture text
 
 ### Option 2: Run from Source
 1. Clone the repository:
@@ -49,14 +49,15 @@ A lightweight, always-on-top screen OCR and translation tool that captures text 
 
 1. **Launch** the application
 2. **Capture text**: 
-   - Hold down the `"` (quote) key
-   - Click and drag to select a region on your screen
-   - Release the quote key
+   - Press `F8` at the top-left corner of the text you want to capture
+   - Press `F8` again at the bottom-right corner of the text
+   - Translation appears automatically
 3. **View results**: The captured text and translation appear in the translucent window
 4. **Close**: Right-click the window or press `Ctrl+Q`
 
 ### Controls
-- **`"` + Click & Drag**: Capture text from screen region
+- **`F8` (first press)**: Set top-left corner of capture area (at current mouse cursor position)
+- **`F8` (second press)**: Set bottom-right corner of capture area (at current mouse cursor position)
 - **Right-click**: Close the application
 - **Ctrl+Q**: Close the application
 - **Mouse wheel**: Scroll through long text
@@ -140,6 +141,13 @@ If you encounter any issues or have questions:
 3. Include your Windows version and any error messages
 
 ## 🔄 Changelog
+
+### v1.1.0
+- **F8 cursor-based selection**: Press F8 at top-left, then F8 at bottom-right corner
+- **Improved text visibility**: Brighter white text with better contrast
+- **Invisible scrollbar**: Clean UI without visible scrollbar but maintains scrolling
+- **Enhanced transparency**: 80% opaque window for better readability
+- **Cleaner codebase**: Removed all debug code and unnecessary files
 
 ### v1.0.0
 - Initial release

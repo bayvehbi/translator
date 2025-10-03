@@ -4,3 +4,4 @@ pytesseract==0.3.10
 pynput==1.7.6
 deep-translator==1.11.4
 pyinstaller==6.0.0
+pywin32==306
