@@ -9,12 +9,14 @@ A lightweight, always-on-top screen OCR and translation tool that captures text 
 ## ✨ Features
 
 - **🎯 Screen OCR**: Capture text from any region of your screen with simple click-and-drag
+- **🔤 Word Translation**: Translate individual words at cursor position with smart detection
 - **🌍 Real-time Translation**: Instant translation to Turkish (easily configurable for other languages)
 - **🔝 Always on Top**: Translucent window that stays above all other applications
+- **🎮 Custom Triggers**: Set any keyboard key, mouse button, or scroll as translation trigger
 - **🧹 Smart Text Cleaning**: Automatically removes newlines and optimizes spacing
 - **📱 Multi-line Display**: Intelligent text wrapping with scrolling support
 - **⚡ Lightweight**: Minimal resource usage with fast performance
-- **🎮 Simple Controls**: Intuitive keyboard and mouse controls
+- **🎯 Smart Word Detection**: Intelligent region capture and nearest word finding
 
 ## 🚀 Quick Start
 
@@ -47,17 +49,28 @@ A lightweight, always-on-top screen OCR and translation tool that captures text 
 
 ## 🎮 How to Use
 
+### Region Translation (Original Feature)
 1. **Launch** the application
 2. **Capture text**: 
    - Press `F8` at the top-left corner of the text you want to capture
    - Press `F8` again at the bottom-right corner of the text
    - Translation appears automatically
-3. **View results**: The captured text and translation appear in the translucent window
-4. **Close**: Right-click the window or press `Ctrl+Q`
+
+### Word Translation (New Feature)
+1. **Set custom trigger** (optional):
+   - Press `Ctrl+F12` to activate trigger setup mode
+   - Press any keyboard key, mouse button, or scroll to set as trigger
+   - Your chosen input becomes the new translation trigger
+2. **Translate words**:
+   - Move cursor to any word on screen
+   - Press `F9` (or your custom trigger) to translate the nearest word
+   - Result shows: `"word : translation (confidence%)"`
 
 ### Controls
-- **`F8` (first press)**: Set top-left corner of capture area (at current mouse cursor position)
-- **`F8` (second press)**: Set bottom-right corner of capture area (at current mouse cursor position)
+- **`F8` (first press)**: Set top-left corner of capture area
+- **`F8` (second press)**: Set bottom-right corner of capture area
+- **`F9`**: Translate word at cursor position (if no custom trigger set)
+- **`Ctrl+F12`**: Set custom translation trigger (keyboard/mouse/scroll)
 - **Right-click**: Close the application
 - **Ctrl+Q**: Close the application
 - **Mouse wheel**: Scroll through long text
@@ -142,12 +155,20 @@ If you encounter any issues or have questions:
 
 ## 🔄 Changelog
 
+### v2.0.0 - Word Translation & Custom Triggers
+- **🔤 Word Translation**: New F9 key to translate individual words at cursor position
+- **🎯 Smart Word Detection**: Intelligent region capture and nearest word finding algorithm
+- **🎮 Custom Triggers**: Set any keyboard key, mouse button, or scroll as translation trigger
+- **⌨️ Ctrl+F12 Setup**: Easy trigger configuration with input counting
+- **🖱️ Mouse Support**: Left/right/middle clicks and scroll up/down as triggers
+- **📊 Input Counting**: Real-time feedback during trigger setup
+- **🧹 Clean Code**: Removed all debug code for better performance
+
 ### v1.1.0
 - **F8 cursor-based selection**: Press F8 at top-left, then F8 at bottom-right corner
 - **Improved text visibility**: Brighter white text with better contrast
 - **Invisible scrollbar**: Clean UI without visible scrollbar but maintains scrolling
 - **Enhanced transparency**: 80% opaque window for better readability
-- **Cleaner codebase**: Removed all debug code and unnecessary files
 
 ### v1.0.0
 - Initial release

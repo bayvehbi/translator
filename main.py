@@ -7,14 +7,22 @@ How it works:
 - Translation starts automatically
 - Results appear in the always‑on‑top window as "original : translation"
 
+NEW FEATURE - Word Translation:
+- Press F9 to translate the nearest word at cursor position
+- Uses smart OCR with word boundary detection
+
 Keys:
 - Press  F8  to set corners (first = top-left, second = bottom-right)
+- Press  F9  to translate word at cursor position
 - Press  Esc  to close application
 """
 from __future__ import annotations
 
 import threading
+import math
+import re
 from dataclasses import dataclass
+from typing import List, Tuple, Optional
 
 import tkinter as tk
 from tkinter import ttk
@@ -24,6 +32,8 @@ import mss
 from pynput import mouse, keyboard
 import pytesseract
 from deep_translator import GoogleTranslator
+
+# No complex image processing needed - just simple OCR and distance calculation
 
 
 # ---------------- Configuration ---------------- #
@@ -42,20 +52,298 @@ class Selection:
     y2: int
 
 
+# ---------------- Word Translation Classes ---------------- #
+@dataclass
+class WordInfo:
+    """Information about a detected word."""
+    text: str
+    x: int
+    y: int
+    width: int
+    height: int
+    confidence: float = 0.0
+
+
+@dataclass
+class TranslationResult:
+    """Result of word translation."""
+    original_word: str
+    translated_word: str
+    confidence: float
+    position: Tuple[int, int]
+    success: bool
+    error_message: Optional[str] = None
+
+
+class WordDetector:
+    """Detects words from OCR data and finds word boundaries."""
+    
+    def __init__(self):
+        self.min_word_length = 2
+        self.max_word_length = 50
+        self.word_pattern = r'\b[a-zA-Z]+\b'
+        
+    def extract_words_from_ocr(self, ocr_data: dict) -> List[WordInfo]:
+        """Extract word information from Tesseract OCR data."""
+        words = []
+        
+        try:
+            # Get detailed OCR data with bounding boxes
+            for i in range(len(ocr_data['text'])):
+                word_text = ocr_data['text'][i].strip()
+                conf = int(ocr_data['conf'][i])
+                
+                # Filter words based on length and pattern
+                if (conf > 0 and 
+                    self.min_word_length <= len(word_text) <= self.max_word_length and
+                    re.match(self.word_pattern, word_text)):
+                    
+                    word_info = WordInfo(
+                        text=word_text,
+                        x=ocr_data['left'][i],
+                        y=ocr_data['top'][i],
+                        width=ocr_data['width'][i],
+                        height=ocr_data['height'][i],
+                        confidence=conf
+                    )
+                    words.append(word_info)
+                    
+        except Exception as e:
+            print(f"Error extracting words from OCR: {e}")
+            
+        return words
+    
+    def find_nearest_word(self, words: List[WordInfo], cursor_x: int, cursor_y: int) -> Optional[WordInfo]:
+        """Find the word closest to the cursor position."""
+        if not words:
+            return None
+            
+        min_distance = float('inf')
+        nearest_word = None
+        
+        for word in words:
+            # Calculate distance from cursor to word center
+            word_center_x = word.x + word.width // 2
+            word_center_y = word.y + word.height // 2
+            
+            distance = math.sqrt(
+                (cursor_x - word_center_x) ** 2 + 
+                (cursor_y - word_center_y) ** 2
+            )
+            
+            # Also check if cursor is within word bounds (closer distance)
+            if (word.x <= cursor_x <= word.x + word.width and
+                word.y <= cursor_y <= word.y + word.height):
+                distance = 0  # Cursor is inside the word
+                
+            if distance < min_distance:
+                min_distance = distance
+                nearest_word = word
+                
+        return nearest_word
+
+
+class SimpleRegionCapture:
+    """Simple region capture - just get a big area around cursor."""
+    
+    def __init__(self):
+        self.region_size = 400  # Big area around cursor
+        
+    def capture_big_region_around_cursor(self, cursor_x: int, cursor_y: int) -> Tuple[int, int, int, int, Image.Image]:
+        """Capture a big region around cursor and return bounds + image."""
+        # Calculate region bounds
+        half_size = self.region_size // 2
+        left = max(0, cursor_x - half_size)
+        top = max(0, cursor_y - half_size)
+        right = cursor_x + half_size
+        bottom = cursor_y + half_size
+        
+        try:
+            # Capture the region
+            with mss.mss() as sct:
+                monitor = {
+                    "top": top,
+                    "left": left,
+                    "width": right - left,
+                    "height": bottom - top
+                }
+                screenshot = sct.grab(monitor)
+                image = Image.frombytes('RGB', (screenshot.width, screenshot.height), screenshot.rgb)
+                
+            return left, top, right, bottom, image
+                
+        except Exception as e:
+            print(f"Region capture error: {e}")
+            return None, None, None, None, None
+
+
+class WordTranslator:
+    """Simple word translation - capture big area and find closest word."""
+    
+    def __init__(self):
+        self.min_confidence = 30  # Minimum OCR confidence
+        self.word_detector = WordDetector()
+        self.region_capture = SimpleRegionCapture()
+    
+    def translate_word_at_cursor(self, cursor_x: int, cursor_y: int) -> TranslationResult:
+        """Main method to translate word at cursor position."""
+        try:
+            # Capture big region around cursor
+            left, top, right, bottom, image = self.region_capture.capture_big_region_around_cursor(cursor_x, cursor_y)
+            if image is None:
+                return TranslationResult(
+                    original_word="",
+                    translated_word="",
+                    confidence=0.0,
+                    position=(cursor_x, cursor_y),
+                    success=False,
+                    error_message="Failed to capture screen region"
+                )
+            
+            # Process with OCR
+            try:
+                ocr_data = pytesseract.image_to_data(
+                    image, 
+                    lang=OCR_LANGS,
+                    config='--psm 6',
+                    output_type=pytesseract.Output.DICT
+                )
+                words = self.word_detector.extract_words_from_ocr(ocr_data)
+                
+            except Exception as e:
+                return TranslationResult(
+                    original_word="",
+                    translated_word="",
+                    confidence=0.0,
+                    position=(cursor_x, cursor_y),
+                    success=False,
+                    error_message=f"OCR processing failed: {e}"
+                )
+            
+            if not words:
+                return TranslationResult(
+                    original_word="",
+                    translated_word="",
+                    confidence=0.0,
+                    position=(cursor_x, cursor_y),
+                    success=False,
+                    error_message="No words detected in region"
+                )
+            
+            # Adjust word positions to screen coordinates
+            for word in words:
+                word.x += left  # Adjust to screen coordinates
+                word.y += top   # Adjust to screen coordinates
+            
+            # Find nearest word to cursor
+            nearest_word = self.word_detector.find_nearest_word(words, cursor_x, cursor_y)
+            if nearest_word is None:
+                return TranslationResult(
+                    original_word="",
+                    translated_word="",
+                    confidence=0.0,
+                    position=(cursor_x, cursor_y),
+                    success=False,
+                    error_message="No suitable word found near cursor"
+                )
+            
+            # Check confidence threshold
+            if nearest_word.confidence < self.min_confidence:
+                return TranslationResult(
+                    original_word=nearest_word.text,
+                    translated_word="",
+                    confidence=nearest_word.confidence,
+                    position=(cursor_x, cursor_y),
+                    success=False,
+                    error_message=f"Word confidence too low: {nearest_word.confidence}%"
+                )
+            
+            # Translate the word
+            try:
+                translated = GoogleTranslator(source="auto", target=TARGET_LANG).translate(nearest_word.text)
+                return TranslationResult(
+                    original_word=nearest_word.text,
+                    translated_word=translated,
+                    confidence=nearest_word.confidence,
+                    position=(cursor_x, cursor_y),
+                    success=True
+                )
+            except Exception as e:
+                return TranslationResult(
+                    original_word=nearest_word.text,
+                    translated_word="",
+                    confidence=nearest_word.confidence,
+                    position=(cursor_x, cursor_y),
+                    success=False,
+                    error_message=f"Translation failed: {e}"
+                )
+                
+        except Exception as e:
+            return TranslationResult(
+                original_word="",
+                translated_word="",
+                confidence=0.0,
+                position=(cursor_x, cursor_y),
+                success=False,
+                error_message=f"Unexpected error: {e}"
+            )
+
+
 class CaptureController:
-    """Handles global keyboard input for screen capture."""
-    def __init__(self, on_region_ready):
+    """Handles global keyboard and mouse input for screen capture and word translation."""
+    def __init__(self, on_region_ready, on_word_translate, on_wait_for_key):
         self.on_region_ready = on_region_ready
+        self.on_word_translate = on_word_translate
+        self.on_wait_for_key = on_wait_for_key
         self._lock = threading.Lock()
         self._points = []  # Store cursor positions
-        self._kb_listener = keyboard.Listener(on_press=self._on_key_press)
+        self._waiting_for_key = False
+        self._ctrl_pressed = False
+        self._f12_pressed = False
+        self._custom_translate_key = None  # Store the custom translation key
+        self._input_count = 0  # Count all inputs during wait mode
+        self._kb_listener = keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
+        self._mouse_listener = mouse.Listener(on_click=self._on_mouse_click, on_move=self._on_mouse_move, on_scroll=self._on_mouse_scroll)
         self._kb_listener.start()
+        self._mouse_listener.start()
 
     def stop(self):
         self._kb_listener.stop()
+        self._mouse_listener.stop()
 
     def _on_key_press(self, key):
         try:
+            # Check for Ctrl+F12 combination
+            if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+                self._ctrl_pressed = True
+            elif key == keyboard.Key.f12:
+                self._f12_pressed = True
+            
+            # If both Ctrl and F12 are pressed, activate wait-for-key mode
+            if self._ctrl_pressed and self._f12_pressed and not self._waiting_for_key:
+                self._waiting_for_key = True
+                self._input_count = 0  # Reset input counter
+                threading.Thread(target=self.on_wait_for_key, daemon=True).start()
+                return True
+            
+            # If we're waiting for input, count this keyboard input
+            if self._waiting_for_key:
+                self._input_count += 1
+                if key not in [keyboard.Key.ctrl_l, keyboard.Key.ctrl_r, keyboard.Key.f12]:
+                    self._waiting_for_key = False
+                    self._custom_translate_key = key
+                    threading.Thread(target=self.on_wait_for_key, args=(f"Keyboard key '{key}' set as translation trigger! (Total inputs detected: {self._input_count})",), daemon=True).start()
+                    return True
+            
+            # Check if pressed key is the custom translation key
+            if self._custom_translate_key and key == self._custom_translate_key:
+                import win32gui
+                cursor_pos = win32gui.GetCursorPos()
+                x, y = cursor_pos
+                threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
+                return True
+            
+            # Original F8 functionality
             if key == keyboard.Key.f8:
                 # Get current mouse cursor position
                 import win32gui
@@ -74,6 +362,78 @@ class CaptureController:
                         sel = Selection(x_left, y_top, x_right, y_bottom)
                         threading.Thread(target=self.on_region_ready, args=(sel,), daemon=True).start()
                         self._points.clear()  # Reset for next selection
+                        
+            # Original F9 functionality (only if no custom key is set)
+            elif key == keyboard.Key.f9 and self._custom_translate_key is None:
+                # Word translation mode
+                import win32gui
+                cursor_pos = win32gui.GetCursorPos()
+                x, y = cursor_pos
+                threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
+                
+        except Exception as e:
+            pass
+        return True
+    
+    def _on_key_release(self, key):
+        """Handle key release events."""
+        try:
+            if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+                self._ctrl_pressed = False
+            elif key == keyboard.Key.f12:
+                self._f12_pressed = False
+        except Exception as e:
+            pass
+        return True
+    
+    def _on_mouse_click(self, x, y, button, pressed):
+        """Handle mouse click events."""
+        try:
+            # If we're waiting for input, count this mouse click
+            if self._waiting_for_key and pressed:
+                self._input_count += 1
+                self._waiting_for_key = False
+                self._custom_translate_key = f"mouse_{button.name}"  # Store mouse button as trigger
+                threading.Thread(target=self.on_wait_for_key, args=(f"Mouse {button.name} click set as translation trigger! (Total inputs detected: {self._input_count})",), daemon=True).start()
+            # Check if this mouse click is the custom translation trigger
+            elif self._custom_translate_key and self._custom_translate_key == f"mouse_{button.name}" and pressed:
+                import win32gui
+                cursor_pos = win32gui.GetCursorPos()
+                x, y = cursor_pos
+                threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
+        except Exception as e:
+            pass
+        return True
+    
+    def _on_mouse_move(self, x, y):
+        """Handle mouse movement events."""
+        try:
+            # If we're waiting for input, count every mouse movement
+            if self._waiting_for_key:
+                self._input_count += 1
+                threading.Thread(target=self.on_wait_for_key, args=(f"Mouse movement detected! (Total inputs: {self._input_count}) - Press a keyboard key to set as translation key",), daemon=True).start()
+        except Exception as e:
+            pass
+        return True
+    
+    def _on_mouse_scroll(self, x, y, dx, dy):
+        """Handle mouse scroll events."""
+        try:
+            # If we're waiting for input, count this mouse scroll
+            if self._waiting_for_key:
+                self._input_count += 1
+                self._waiting_for_key = False
+                scroll_direction = "up" if dy > 0 else "down"
+                self._custom_translate_key = f"mouse_scroll_{scroll_direction}"  # Store scroll as trigger
+                threading.Thread(target=self.on_wait_for_key, args=(f"Mouse scroll {scroll_direction} set as translation trigger! (Total inputs detected: {self._input_count})",), daemon=True).start()
+            # Check if this mouse scroll is the custom translation trigger
+            elif self._custom_translate_key:
+                scroll_direction = "up" if dy > 0 else "down"
+                if self._custom_translate_key == f"mouse_scroll_{scroll_direction}":
+                    import win32gui
+                    cursor_pos = win32gui.GetCursorPos()
+                    x, y = cursor_pos
+                    threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
         except Exception as e:
             pass
         return True
@@ -215,11 +575,12 @@ class SimpleApp(tk.Tk):
         self.text_widget.bind('<B1-Motion>', self.on_move)
         
         # Initial message
-        self.text_widget.insert(tk.END, "Press F8 at top-left corner, then F8 at bottom-right corner...")
+        self.text_widget.insert(tk.END, "Press F8 for region translation, F9 for word translation, Ctrl+F12 to set custom trigger (keyboard/mouse/scroll)...")
         
         # Worker & controller
         self.worker = Worker(self._on_result)
-        self.controller = CaptureController(self._on_region_ready)
+        self.word_translator = WordTranslator()
+        self.controller = CaptureController(self._on_region_ready, self._on_word_translate, self._on_wait_for_key)
 
         # Add close button (right-click to close)
         self.bind('<Button-3>', self._on_close)  # Right-click to close
@@ -243,9 +604,47 @@ class SimpleApp(tk.Tk):
     def _on_region_ready(self, sel: Selection):
         self.text_widget.config(state=tk.NORMAL)  # Enable editing
         self.text_widget.delete("1.0", tk.END)
-        self.text_widget.insert(tk.END, "Processing...")
+        self.text_widget.insert(tk.END, "Processing region...")
         self.text_widget.config(state=tk.DISABLED)  # Disable editing again
         self.worker.process(sel)
+
+    def _on_word_translate(self, cursor_x: int, cursor_y: int):
+        """Handle word translation at cursor position."""
+        self.text_widget.config(state=tk.NORMAL)  # Enable editing
+        self.text_widget.delete("1.0", tk.END)
+        self.text_widget.insert(tk.END, "Finding word at cursor...")
+        self.text_widget.config(state=tk.DISABLED)  # Disable editing again
+        
+        # Perform word translation
+        result = self.word_translator.translate_word_at_cursor(cursor_x, cursor_y)
+        self._on_word_result(result)
+
+    def _on_word_result(self, result: TranslationResult):
+        """Handle word translation result."""
+        self.text_widget.config(state=tk.NORMAL)  # Enable editing
+        self.text_widget.delete("1.0", tk.END)
+        
+        if result.success:
+            # Format the result with confidence
+            result_text = f"{result.original_word} : {result.translated_word} ({result.confidence}%)"
+        else:
+            # Show error message
+            result_text = f"Word translation failed: {result.error_message}"
+            
+        self.text_widget.insert(tk.END, result_text)
+        self.text_widget.config(state=tk.DISABLED)  # Disable editing again
+
+    def _on_wait_for_key(self, message=None):
+        """Handle wait-for-key mode activation."""
+        self.text_widget.config(state=tk.NORMAL)  # Enable editing
+        self.text_widget.delete("1.0", tk.END)
+        
+        if message:
+            self.text_widget.insert(tk.END, message)
+        else:
+            self.text_widget.insert(tk.END, "Waiting for key... Press any key to set it as translation key")
+        
+        self.text_widget.config(state=tk.DISABLED)  # Disable editing again
 
     def _on_result(self, original: str, translated: str):
         self.text_widget.config(state=tk.NORMAL)  # Enable editing
