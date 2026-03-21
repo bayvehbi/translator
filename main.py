@@ -55,6 +55,50 @@ OPENAI_CLIENT: OpenAI = None
 OPENAI_MODEL   = CONFIG.get("openai_model", "gpt-4o-mini")
 
 
+def word_by_word(text: str, translated: str = "") -> str:
+    """
+    Word-by-word mapping.
+    If LLM is active: single call asking which target word each source word maps to
+    (contextual, matches the actual translation).
+    Otherwise: translate each word individually with Google Translate.
+    """
+    if USE_LLM and translated:
+        global OPENAI_CLIENT
+        if OPENAI_CLIENT is None:
+            api_key = CONFIG.get("openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
+            if not api_key:
+                return ""
+            OPENAI_CLIENT = OpenAI(api_key=api_key)
+        prompt = (
+            f"Sentence: \"{text}\"\n\n"
+            f"For each word in the sentence, give its {TARGET_LANG} meaning as used in this specific sentence (context-aware, not dictionary).\n"
+            f"Ignore word order differences. Output one line only, no extra text:\n"
+            f"word1→meaning1  word2→meaning2  word3→meaning3"
+        )
+        try:
+            response = OPENAI_CLIENT.chat.completions.create(
+                model=OPENAI_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception:
+            return ""
+    else:
+        words = text.split()[:20]
+        parts = []
+        for w in words:
+            clean = re.sub(r'[^a-zA-ZÀ-ÿ]', '', w)
+            if not clean:
+                continue
+            try:
+                t = GoogleTranslator(source="auto", target=TARGET_LANG).translate(clean)
+                parts.append(f"{clean}→{t}")
+            except Exception:
+                parts.append(clean)
+        return '  '.join(parts)
+
+
 def translate(text: str) -> str:
     """Translate text to TARGET_LANG using the active backend."""
     if USE_LLM:
@@ -525,17 +569,20 @@ class Worker:
 
         # Translate
         translated = ""
+        literal = ""
         if text and not text.startswith("OCR Error"):
             try:
-                translated = translate(text)
-                # Clean the translated text too
-                translated = self.clean_text(translated)
+                translated = self.clean_text(translate(text))
             except Exception as e:
                 translated = f"Translation Error: {e}"
+            try:
+                literal = word_by_word(text, translated)
+            except Exception:
+                literal = ""
         else:
             translated = "No text detected"
 
-        self.ui_callback(text, translated)
+        self.ui_callback(text, translated, literal)
 
 
 class SimpleApp(tk.Tk):
@@ -721,22 +768,20 @@ class SimpleApp(tk.Tk):
         
         self.text_widget.config(state=tk.DISABLED)  # Disable editing again
 
-    def _on_result(self, original: str, translated: str):
-        self.text_widget.config(state=tk.NORMAL)  # Enable editing
+    def _on_result(self, original: str, translated: str, literal: str = ""):
+        self.text_widget.config(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
-        
-        # Format as "original : translation" - completely flat, no quotes
-        if original and translated:
-            result = f"{original} : {translated}"
-        elif original:
-            result = f"{original} : (translation failed)"
-        elif translated:
-            result = f"(no text detected) : {translated}"
-        else:
-            result = "No text detected"
-            
+
+        line1 = original or "(no text detected)"
+        line2 = translated or "(translation failed)"
+        line3 = literal or ""
+
+        result = f"{line1}\n{line2}"
+        if line3:
+            result += f"\n{line3}"
+
         self.text_widget.insert(tk.END, result)
-        self.text_widget.config(state=tk.DISABLED)  # Disable editing again
+        self.text_widget.config(state=tk.DISABLED)
 
     def _on_close(self, event=None):
         try:
