@@ -47,7 +47,8 @@ def load_config() -> dict:
 
 CONFIG = load_config()
 
-TARGET_LANG    = "tr"
+TARGET_LANG      = "tr"
+TARGET_LANG_NAME = "Turkish"
 OCR_LANGS      = ['en']
 READER: easyocr.Reader = None
 USE_LLM        = CONFIG.get("use_llm", False)
@@ -71,7 +72,7 @@ def word_by_word(text: str, translated: str = "") -> str:
             OPENAI_CLIENT = OpenAI(api_key=api_key)
         prompt = (
             f"Sentence: \"{text}\"\n\n"
-            f"For each word in the sentence, give its {TARGET_LANG} meaning as used in this specific sentence (context-aware, not dictionary).\n"
+            f"For each word in the sentence, give its {TARGET_LANG_NAME} meaning as used in this specific sentence (context-aware, not dictionary).\n"
             f"Ignore word order differences. Output one line only, no extra text:\n"
             f"word1→meaning1  word2→meaning2  word3→meaning3"
         )
@@ -111,7 +112,7 @@ def translate(text: str) -> str:
         response = OPENAI_CLIENT.chat.completions.create(
             model=OPENAI_MODEL,
             messages=[
-                {"role": "system", "content": f"Translate to {TARGET_LANG}. Return only the translation, nothing else."},
+                {"role": "system", "content": f"Translate to {TARGET_LANG_NAME}. Return only the translation, nothing else."},
                 {"role": "user",   "content": text},
             ],
             temperature=0,
