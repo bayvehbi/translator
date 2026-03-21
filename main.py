@@ -662,7 +662,7 @@ class SimpleApp(tk.Tk):
         lang_label = "FR→TR" if 'fr' in OCR_LANGS else "EN→TR"
         self.text_widget.config(state=tk.NORMAL)
         backend = "LLM" if USE_LLM else "Google"
-        self.text_widget.insert(tk.END, f"[{lang_label}] [{backend}] F8=region  F9=word  Ctrl+F8=remap region  Ctrl+F9=remap word  Ctrl+L=toggle  RClick=close")
+        self.text_widget.insert(tk.END, f"[{lang_label}] [{backend}] F8=region  F9=word  Ctrl+F8=remap region  Ctrl+F9=remap word  Ctrl+L=toggle translation(LLM/Google)  RClick=close")
         self.text_widget.config(state=tk.DISABLED)
         
         # Worker & controller
