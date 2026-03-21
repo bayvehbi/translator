@@ -513,70 +513,87 @@ class SimpleApp(tk.Tk):
         # Remove window decorations for cleaner look
         self.overrideredirect(True)
         
-        # Set window size to full screen width, multi-line height
+        # Set window size to full screen width
         screen_width = self.winfo_screenwidth()
-        self.geometry(f"{screen_width}x120+0+0")  # Full width, 120px height for 3 lines, very top of screen
-        self.resizable(True, False)  # Allow horizontal resize only
-        
-        # Force window to update geometry
+        self.geometry(f"{screen_width}x300+0+0")
+        self.resizable(True, False)
         self.update_idletasks()
-        
-        # Create completely transparent frame
+
+        # Word history: {word: {"translation": str, "count": int}}
+        self.word_history: dict = {}
+
+        # ---- top frame: current translation ----
         self.frame = tk.Frame(self, bg="#000000")
-        self.frame.pack(fill=tk.BOTH, expand=True)
-        
-        # Create invisible scrollbar for text widget
-        self.scrollbar = tk.Scrollbar(self.frame, orient="vertical")
-        
-        # Create text widget with solid text but transparent background
+        self.frame.pack(fill=tk.BOTH)
+
         self.text_widget = tk.Text(
-            self.frame, 
-            height=3,  # Allow up to 3 lines
-            wrap=tk.WORD,  # Wrap at word boundaries
-            bg="#000000",  # Black background (will be transparent)
-            fg="#ffffff",  # Bright white text for maximum visibility
+            self.frame,
+            height=3,
+            wrap=tk.WORD,
+            bg="#000000",
+            fg="#ffffff",
             insertbackground="#ffffff",
-            font=("Consolas", 18, "bold"),  # Larger and bold for better visibility
-            padx=0,  # No padding
-            pady=0,  # No padding
-            relief=tk.FLAT,  # No border
-            bd=0,  # No border width
-            highlightthickness=0,  # No highlight border
-            selectbackground="#333333",  # Dark selection background
-            selectforeground="#ffffff",  # White selected text
-            state=tk.DISABLED,  # Make it read-only and flat
-            yscrollcommand=self.scrollbar.set  # Connect to scrollbar
+            font=("Consolas", 18, "bold"),
+            padx=0, pady=0,
+            relief=tk.FLAT, bd=0,
+            highlightthickness=0,
+            selectbackground="#333333",
+            selectforeground="#ffffff",
+            state=tk.DISABLED,
         )
-        
-        # Configure invisible scrollbar
-        self.scrollbar.config(command=self.text_widget.yview)
-        # Don't pack the scrollbar - keep it invisible but functional
-        
-        # Pack text widget to fill the entire frame
         self.text_widget.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        
-        # Add drag functionality to move the window
-        self.bind('<Button-1>', self.start_move)
-        self.bind('<B1-Motion>', self.on_move)
-        self.text_widget.bind('<Button-1>', self.start_move)
-        self.text_widget.bind('<B1-Motion>', self.on_move)
-        
+
+        # ---- separator ----
+        tk.Frame(self, bg="#333333", height=1).pack(fill=tk.X)
+
+        # ---- bottom frame: word history ----
+        self.history_frame = tk.Frame(self, bg="#000000")
+        self.history_frame.pack(fill=tk.BOTH, expand=True)
+
+        tk.Label(
+            self.history_frame,
+            text="HISTORY",
+            bg="#000000", fg="#888888",
+            font=("Consolas", 10, "bold"),
+            anchor="w",
+        ).pack(fill=tk.X, padx=5)
+
+        self.history_widget = tk.Text(
+            self.history_frame,
+            wrap=tk.WORD,
+            bg="#000000",
+            fg="#cccccc",
+            insertbackground="#cccccc",
+            font=("Consolas", 13),
+            padx=0, pady=0,
+            relief=tk.FLAT, bd=0,
+            highlightthickness=0,
+            selectbackground="#333333",
+            selectforeground="#ffffff",
+            state=tk.DISABLED,
+        )
+        self.history_widget.pack(fill=tk.BOTH, expand=True, padx=5, pady=2)
+
+        # Add drag functionality to all widgets
+        for w in (self, self.text_widget, self.history_widget, self.history_frame):
+            w.bind('<Button-1>', self.start_move)
+            w.bind('<B1-Motion>', self.on_move)
+
         # Initial message
-        lang_label = "FR→TR" if OCR_LANGS == "fra" else "EN→TR"
+        lang_label = "FR→TR" if 'fr' in OCR_LANGS else "EN→TR"
+        self.text_widget.config(state=tk.NORMAL)
         self.text_widget.insert(tk.END, f"[{lang_label}] F8=region, F9=word, Ctrl+F12=custom trigger, RClick=close")
+        self.text_widget.config(state=tk.DISABLED)
         
         # Worker & controller
         self.worker = Worker(self._on_result)
         self.word_translator = WordTranslator()
         self.controller = CaptureController(self._on_region_ready, self._on_word_translate, self._on_wait_for_key)
 
-        # Add close button (right-click to close)
-        self.bind('<Button-3>', self._on_close)  # Right-click to close
-        self.text_widget.bind('<Button-3>', self._on_close)
-        
-        # Add keyboard shortcut to close (Ctrl+Q)
-        self.bind('<Control-q>', self._on_close)
-        self.text_widget.bind('<Control-q>', self._on_close)
+        # Right-click to close, Ctrl+Q to quit
+        for w in (self, self.text_widget, self.history_widget):
+            w.bind('<Button-3>', self._on_close)
+            w.bind('<Control-q>', self._on_close)
 
     def start_move(self, event):
         self.x = event.x
@@ -609,18 +626,40 @@ class SimpleApp(tk.Tk):
 
     def _on_word_result(self, result: TranslationResult):
         """Handle word translation result."""
-        self.text_widget.config(state=tk.NORMAL)  # Enable editing
+        self.text_widget.config(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
-        
         if result.success:
-            # Format the result with confidence
-            result_text = f"{result.original_word} : {result.translated_word} ({result.confidence}%)"
+            result_text = f"{result.original_word} : {result.translated_word} ({result.confidence:.0f}%)"
+            self._add_to_history(result.original_word.lower(), result.translated_word)
         else:
-            # Show error message
             result_text = f"Word translation failed: {result.error_message}"
-            
         self.text_widget.insert(tk.END, result_text)
-        self.text_widget.config(state=tk.DISABLED)  # Disable editing again
+        self.text_widget.config(state=tk.DISABLED)
+
+    def _add_to_history(self, word: str, translation: str):
+        """Add or increment a word in history, then refresh the display."""
+        if word in self.word_history:
+            self.word_history[word]["count"] += 1
+        else:
+            self.word_history[word] = {"translation": translation, "count": 1}
+        self._refresh_history()
+
+    def _refresh_history(self):
+        """Redraw the history widget sorted by search count."""
+        sorted_words = sorted(
+            self.word_history.items(),
+            key=lambda item: item[1]["count"],
+            reverse=True,
+        )
+        self.history_widget.config(state=tk.NORMAL)
+        self.history_widget.delete("1.0", tk.END)
+        for word, data in sorted_words:
+            count = data["count"]
+            translation = data["translation"]
+            times = f"{count}x" if count > 1 else ""
+            line = f"{word} → {translation}  {times}\n"
+            self.history_widget.insert(tk.END, line)
+        self.history_widget.config(state=tk.DISABLED)
 
     def _on_wait_for_key(self, message=None):
         """Handle wait-for-key mode activation."""
