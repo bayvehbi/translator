@@ -50,7 +50,7 @@ CONFIG = load_config()
 TARGET_LANG    = "tr"
 OCR_LANGS      = ['en']
 READER: easyocr.Reader = None
-USE_LLM        = False
+USE_LLM        = CONFIG.get("use_llm", False)
 OPENAI_CLIENT: OpenAI = None
 OPENAI_MODEL   = CONFIG.get("openai_model", "gpt-4o-mini")
 
@@ -359,19 +359,23 @@ class WordTranslator:
 
 class CaptureController:
     """Handles global keyboard and mouse input for screen capture and word translation."""
+
     def __init__(self, on_region_ready, on_word_translate, on_wait_for_key):
-        self.on_region_ready = on_region_ready
+        self.on_region_ready  = on_region_ready
         self.on_word_translate = on_word_translate
-        self.on_wait_for_key = on_wait_for_key
+        self.on_wait_for_key  = on_wait_for_key
         self._lock = threading.Lock()
-        self._points = []  # Store cursor positions
-        self._waiting_for_key = False
+        self._points = []
+
         self._ctrl_pressed = False
-        self._f12_pressed = False
-        self._custom_translate_key = None  # Store the custom translation key
-        self._input_count = 0  # Count all inputs during wait mode
-        self._kb_listener = keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
-        self._mouse_listener = mouse.Listener(on_click=self._on_mouse_click, on_move=self._on_mouse_move, on_scroll=self._on_mouse_scroll)
+        # 'region', 'word', or None
+        self._waiting_mode: Optional[str] = None
+        # custom keys (keyboard key object or "mouse_X" / "mouse_scroll_X" string)
+        self._custom_region_key = None
+        self._custom_word_key   = None
+
+        self._kb_listener    = keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
+        self._mouse_listener = mouse.Listener(on_click=self._on_mouse_click, on_scroll=self._on_mouse_scroll)
         self._kb_listener.start()
         self._mouse_listener.start()
 
@@ -379,130 +383,120 @@ class CaptureController:
         self._kb_listener.stop()
         self._mouse_listener.stop()
 
+    # ---- helpers ----
+
+    def _notify(self, msg):
+        threading.Thread(target=self.on_wait_for_key, args=(msg,), daemon=True).start()
+
+    def _do_region(self):
+        import win32gui
+        x, y = win32gui.GetCursorPos()
+        with self._lock:
+            self._points.append((x, y))
+            if len(self._points) == 2:
+                (x1, y1), (x2, y2) = self._points
+                x_left, x_right = sorted([x1, x2])
+                y_top, y_bottom  = sorted([y1, y2])
+                sel = Selection(x_left, y_top, x_right, y_bottom)
+                threading.Thread(target=self.on_region_ready, args=(sel,), daemon=True).start()
+                self._points.clear()
+
+    def _do_word(self):
+        import win32gui
+        x, y = win32gui.GetCursorPos()
+        threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
+
+    def _capture_key(self, key_val):
+        """Assign key_val to the current waiting mode and notify."""
+        mode = self._waiting_mode
+        self._waiting_mode = None
+        if mode == 'region':
+            self._custom_region_key = key_val
+            self._notify(f"Region key mapped to: {key_val}")
+        else:
+            self._custom_word_key = key_val
+            self._notify(f"Word key mapped to: {key_val}")
+
+    # ---- listeners ----
+
     def _on_key_press(self, key):
         try:
-            # Check for Ctrl+F12 combination
-            if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+            if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
                 self._ctrl_pressed = True
-            elif key == keyboard.Key.f12:
-                self._f12_pressed = True
-            
-            # If both Ctrl and F12 are pressed, activate wait-for-key mode
-            if self._ctrl_pressed and self._f12_pressed and not self._waiting_for_key:
-                self._waiting_for_key = True
-                self._input_count = 0  # Reset input counter
-                threading.Thread(target=self.on_wait_for_key, daemon=True).start()
                 return True
-            
-            # If we're waiting for input, count this keyboard input
-            if self._waiting_for_key:
-                self._input_count += 1
-                if key not in [keyboard.Key.ctrl_l, keyboard.Key.ctrl_r, keyboard.Key.f12]:
-                    self._waiting_for_key = False
-                    self._custom_translate_key = key
-                    threading.Thread(target=self.on_wait_for_key, args=(f"Keyboard key '{key}' set as translation trigger! (Total inputs detected: {self._input_count})",), daemon=True).start()
-                    return True
-            
-            # Check if pressed key is the custom translation key
-            if self._custom_translate_key and key == self._custom_translate_key:
-                import win32gui
-                cursor_pos = win32gui.GetCursorPos()
-                x, y = cursor_pos
-                threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
+
+            # Ctrl+F8 → start mapping region key
+            if key == keyboard.Key.f8 and self._ctrl_pressed:
+                self._waiting_mode = 'region'
+                self._notify("Press any key / click / scroll to use as region trigger...")
                 return True
-            
-            # Original F8 functionality
-            if key == keyboard.Key.f8:
-                # Get current mouse cursor position
-                import win32gui
-                cursor_pos = win32gui.GetCursorPos()
-                x, y = cursor_pos
-                
-                with self._lock:
-                    self._points.append((x, y))
-                    
-                    if len(self._points) == 2:
-                        # We have both points, create selection
-                        (x1, y1), (x2, y2) = self._points
-                        x_left, x_right = sorted([x1, x2])
-                        y_top, y_bottom = sorted([y1, y2])
-                        
-                        sel = Selection(x_left, y_top, x_right, y_bottom)
-                        threading.Thread(target=self.on_region_ready, args=(sel,), daemon=True).start()
-                        self._points.clear()  # Reset for next selection
-                        
-            # Original F9 functionality (only if no custom key is set)
-            elif key == keyboard.Key.f9 and self._custom_translate_key is None:
-                # Word translation mode
-                import win32gui
-                cursor_pos = win32gui.GetCursorPos()
-                x, y = cursor_pos
-                threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
-                
-        except Exception as e:
+
+            # Ctrl+F9 → start mapping word key
+            if key == keyboard.Key.f9 and self._ctrl_pressed:
+                self._waiting_mode = 'word'
+                self._notify("Press any key / click / scroll to use as word trigger...")
+                return True
+
+            # Capture key if in waiting mode (ignore bare Ctrl)
+            if self._waiting_mode:
+                self._capture_key(key)
+                return True
+
+            # Fire region action
+            region_trigger = self._custom_region_key or keyboard.Key.f8
+            if key == region_trigger:
+                self._do_region()
+                return True
+
+            # Fire word action
+            word_trigger = self._custom_word_key or keyboard.Key.f9
+            if key == word_trigger:
+                self._do_word()
+                return True
+
+        except Exception:
             pass
         return True
-    
+
     def _on_key_release(self, key):
-        """Handle key release events."""
         try:
-            if key == keyboard.Key.ctrl_l or key == keyboard.Key.ctrl_r:
+            if key in (keyboard.Key.ctrl_l, keyboard.Key.ctrl_r):
                 self._ctrl_pressed = False
-            elif key == keyboard.Key.f12:
-                self._f12_pressed = False
-        except Exception as e:
+        except Exception:
             pass
         return True
-    
+
     def _on_mouse_click(self, x, y, button, pressed):
-        """Handle mouse click events."""
         try:
-            # If we're waiting for input, count this mouse click
-            if self._waiting_for_key and pressed:
-                self._input_count += 1
-                self._waiting_for_key = False
-                self._custom_translate_key = f"mouse_{button.name}"  # Store mouse button as trigger
-                threading.Thread(target=self.on_wait_for_key, args=(f"Mouse {button.name} click set as translation trigger! (Total inputs detected: {self._input_count})",), daemon=True).start()
-            # Check if this mouse click is the custom translation trigger
-            elif self._custom_translate_key and self._custom_translate_key == f"mouse_{button.name}" and pressed:
-                import win32gui
-                cursor_pos = win32gui.GetCursorPos()
-                x, y = cursor_pos
-                threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
-        except Exception as e:
+            if not pressed:
+                return True
+            btn_key = f"mouse_{button.name}"
+
+            if self._waiting_mode:
+                self._capture_key(btn_key)
+                return True
+
+            if self._custom_region_key == btn_key:
+                self._do_region()
+            elif self._custom_word_key == btn_key:
+                self._do_word()
+        except Exception:
             pass
         return True
-    
-    def _on_mouse_move(self, x, y):
-        """Handle mouse movement events."""
-        try:
-            # If we're waiting for input, count every mouse movement
-            if self._waiting_for_key:
-                self._input_count += 1
-                threading.Thread(target=self.on_wait_for_key, args=(f"Mouse movement detected! (Total inputs: {self._input_count}) - Press a keyboard key to set as translation key",), daemon=True).start()
-        except Exception as e:
-            pass
-        return True
-    
+
     def _on_mouse_scroll(self, x, y, dx, dy):
-        """Handle mouse scroll events."""
         try:
-            # If we're waiting for input, count this mouse scroll
-            if self._waiting_for_key:
-                self._input_count += 1
-                self._waiting_for_key = False
-                scroll_direction = "up" if dy > 0 else "down"
-                self._custom_translate_key = f"mouse_scroll_{scroll_direction}"  # Store scroll as trigger
-                threading.Thread(target=self.on_wait_for_key, args=(f"Mouse scroll {scroll_direction} set as translation trigger! (Total inputs detected: {self._input_count})",), daemon=True).start()
-            # Check if this mouse scroll is the custom translation trigger
-            elif self._custom_translate_key:
-                scroll_direction = "up" if dy > 0 else "down"
-                if self._custom_translate_key == f"mouse_scroll_{scroll_direction}":
-                    import win32gui
-                    cursor_pos = win32gui.GetCursorPos()
-                    x, y = cursor_pos
-                    threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
-        except Exception as e:
+            scroll_key = f"mouse_scroll_{'up' if dy > 0 else 'down'}"
+
+            if self._waiting_mode:
+                self._capture_key(scroll_key)
+                return True
+
+            if self._custom_region_key == scroll_key:
+                self._do_region()
+            elif self._custom_word_key == scroll_key:
+                self._do_word()
+        except Exception:
             pass
         return True
 
@@ -613,7 +607,7 @@ class SimpleApp(tk.Tk):
 
         self.text_widget = tk.Text(
             self.frame,
-            height=3,
+            height=1,
             wrap=tk.WORD,
             bg="#000000",
             fg="#ffffff",
@@ -667,7 +661,8 @@ class SimpleApp(tk.Tk):
         # Initial message
         lang_label = "FR→TR" if 'fr' in OCR_LANGS else "EN→TR"
         self.text_widget.config(state=tk.NORMAL)
-        self.text_widget.insert(tk.END, f"[{lang_label}] F8=region, F9=word, Ctrl+F12=custom trigger, RClick=close")
+        backend = "LLM" if USE_LLM else "Google"
+        self.text_widget.insert(tk.END, f"[{lang_label}] [{backend}] F8=region  F9=word  Ctrl+F8=remap region  Ctrl+F9=remap word  Ctrl+L=toggle  RClick=close")
         self.text_widget.config(state=tk.DISABLED)
         
         # Worker & controller
@@ -768,6 +763,21 @@ class SimpleApp(tk.Tk):
         
         self.text_widget.config(state=tk.DISABLED)  # Disable editing again
 
+    def _fit_translation(self):
+        """Resize text_widget and window height to fit actual rendered content."""
+        self.text_widget.update_idletasks()
+        try:
+            n = self.text_widget.count("1.0", "end", "displaylines")[0] or 1
+        except Exception:
+            n = 1
+        self.text_widget.config(height=max(1, n))
+        self.update_idletasks()
+        w = self.winfo_width()
+        h = self.winfo_reqheight()
+        x = self.winfo_x()
+        y = self.winfo_y()
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
     def _on_result(self, original: str, translated: str, literal: str = ""):
         self.text_widget.config(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
@@ -782,6 +792,7 @@ class SimpleApp(tk.Tk):
 
         self.text_widget.insert(tk.END, result)
         self.text_widget.config(state=tk.DISABLED)
+        self.after(0, self._fit_translation)
 
     def _on_close(self, event=None):
         try:
@@ -814,7 +825,7 @@ def pick_language():
         picker.destroy()
 
     tk.Button(frame, text="English", width=10, command=lambda: choose(['en'])).pack(side=tk.LEFT, padx=10)
-    tk.Button(frame, text="French",  width=10, command=lambda: choose(['fr'])).pack(side=tk.LEFT, padx=10)
+    tk.Button(frame, text="French",  width=10, command=lambda: choose(['fr', 'en'])).pack(side=tk.LEFT, padx=10)
 
     picker.mainloop()
 
