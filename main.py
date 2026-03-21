@@ -21,6 +21,8 @@ from __future__ import annotations
 import threading
 import math
 import re
+import os
+import json
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
@@ -31,12 +33,48 @@ import mss
 import easyocr
 from pynput import mouse, keyboard
 from deep_translator import GoogleTranslator
+from openai import OpenAI
 
 
 # ---------------- Configuration ---------------- #
-TARGET_LANG = "tr"        # translation target language (Turkish)
-OCR_LANGS   = ['en']      # EasyOCR language list (set by language picker)
-READER: easyocr.Reader = None  # initialized after language selection
+def load_config() -> dict:
+    path = os.path.join(os.path.dirname(__file__), "config.json")
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+CONFIG = load_config()
+
+TARGET_LANG    = "tr"
+OCR_LANGS      = ['en']
+READER: easyocr.Reader = None
+USE_LLM        = False
+OPENAI_CLIENT: OpenAI = None
+OPENAI_MODEL   = CONFIG.get("openai_model", "gpt-4o-mini")
+
+
+def translate(text: str) -> str:
+    """Translate text to TARGET_LANG using the active backend."""
+    if USE_LLM:
+        global OPENAI_CLIENT
+        if OPENAI_CLIENT is None:
+            api_key = CONFIG.get("openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
+            if not api_key:
+                return "Error: set openai_api_key in config.json"
+            OPENAI_CLIENT = OpenAI(api_key=api_key)
+        response = OPENAI_CLIENT.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[
+                {"role": "system", "content": f"Translate to {TARGET_LANG}. Return only the translation, nothing else."},
+                {"role": "user",   "content": text},
+            ],
+            temperature=0,
+        )
+        return response.choices[0].message.content.strip()
+    else:
+        return GoogleTranslator(source="auto", target=TARGET_LANG).translate(text)
 
 
 @dataclass
@@ -246,7 +284,7 @@ class WordTranslator:
             
             # Translate the word
             try:
-                translated = GoogleTranslator(source="auto", target=TARGET_LANG).translate(nearest_word.text)
+                translated = translate(nearest_word.text)
                 return TranslationResult(
                     original_word=nearest_word.text,
                     translated_word=translated,
@@ -489,7 +527,7 @@ class Worker:
         translated = ""
         if text and not text.startswith("OCR Error"):
             try:
-                translated = GoogleTranslator(source="auto", target=TARGET_LANG).translate(text)
+                translated = translate(text)
                 # Clean the translated text too
                 translated = self.clean_text(translated)
             except Exception as e:
@@ -590,10 +628,11 @@ class SimpleApp(tk.Tk):
         self.word_translator = WordTranslator()
         self.controller = CaptureController(self._on_region_ready, self._on_word_translate, self._on_wait_for_key)
 
-        # Right-click to close, Ctrl+Q to quit
+        # Right-click to close (all widgets), keyboard shortcuts on root only
         for w in (self, self.text_widget, self.history_widget):
             w.bind('<Button-3>', self._on_close)
-            w.bind('<Control-q>', self._on_close)
+        self.bind('<Control-q>', self._on_close)
+        self.bind('<Control-l>', self._toggle_llm)
 
     def start_move(self, event):
         self.x = event.x
@@ -660,6 +699,15 @@ class SimpleApp(tk.Tk):
             line = f"{word} → {translation}  {times}\n"
             self.history_widget.insert(tk.END, line)
         self.history_widget.config(state=tk.DISABLED)
+
+    def _toggle_llm(self, event=None):
+        global USE_LLM
+        USE_LLM = not USE_LLM
+        mode = f"OpenAI ({OPENAI_MODEL})" if USE_LLM else "Google Translate"
+        self.text_widget.config(state=tk.NORMAL)
+        self.text_widget.delete("1.0", tk.END)
+        self.text_widget.insert(tk.END, f"Translation backend: {mode}")
+        self.text_widget.config(state=tk.DISABLED)
 
     def _on_wait_for_key(self, message=None):
         """Handle wait-for-key mode activation."""

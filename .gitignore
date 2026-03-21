@@ -51,6 +51,9 @@ venv.bak/
 ehthumbs.db
 Thumbs.db
 
+# Config with secrets
+config.json
+
 # Debug files
 debug_captures/
 *.log
