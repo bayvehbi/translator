@@ -1,0 +1,19 @@
+{
+  "language_pairs": [
+    {
+      "name": "English → Turkish",
+      "id": "en_tr",
+      "source_lang": "en",
+      "ocr_lang": "eng",
+      "target_lang": "tr"
+    },
+    {
+      "name": "French → Turkish",
+      "id": "fr_tr",
+      "source_lang": "fr",
+      "ocr_lang": "fra",
+      "target_lang": "tr"
+    }
+  ],
+  "default_pair": "fr_tr"
+}

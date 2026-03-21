@@ -25,23 +25,18 @@ from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
 import tkinter as tk
-from tkinter import ttk
-
+import numpy as np
 from PIL import Image, ImageGrab
 import mss
+import easyocr
 from pynput import mouse, keyboard
-import pytesseract
 from deep_translator import GoogleTranslator
-
-# No complex image processing needed - just simple OCR and distance calculation
 
 
 # ---------------- Configuration ---------------- #
-TARGET_LANG = "tr"           # translation target language (Turkish)
-OCR_LANGS   = "eng"          # tesseract language (English only)
-
-# Tesseract path
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+TARGET_LANG = "tr"        # translation target language (Turkish)
+OCR_LANGS   = ['en']      # EasyOCR language list (set by language picker)
+READER: easyocr.Reader = None  # initialized after language selection
 
 
 @dataclass
@@ -81,36 +76,32 @@ class WordDetector:
     def __init__(self):
         self.min_word_length = 2
         self.max_word_length = 50
-        self.word_pattern = r'\b[a-zA-Z]+\b'
+        self.word_pattern = r'[a-zA-ZÀ-ÿ]+'
         
-    def extract_words_from_ocr(self, ocr_data: dict) -> List[WordInfo]:
-        """Extract word information from Tesseract OCR data."""
+    def extract_words_from_easyocr(self, results: list) -> List[WordInfo]:
+        """Extract word information from EasyOCR results."""
         words = []
-        
         try:
-            # Get detailed OCR data with bounding boxes
-            for i in range(len(ocr_data['text'])):
-                word_text = ocr_data['text'][i].strip()
-                conf = int(ocr_data['conf'][i])
-                
-                # Filter words based on length and pattern
-                if (conf > 0 and 
-                    self.min_word_length <= len(word_text) <= self.max_word_length and
-                    re.match(self.word_pattern, word_text)):
-                    
-                    word_info = WordInfo(
-                        text=word_text,
-                        x=ocr_data['left'][i],
-                        y=ocr_data['top'][i],
-                        width=ocr_data['width'][i],
-                        height=ocr_data['height'][i],
-                        confidence=conf
-                    )
-                    words.append(word_info)
-                    
+            for bbox, text, conf in results:
+                # bbox = [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+                x = int(bbox[0][0])
+                y = int(bbox[0][1])
+                width  = int(bbox[1][0]) - x
+                height = int(bbox[2][1]) - y
+                conf_pct = conf * 100
+
+                for word_text in text.split():
+                    word_text = word_text.strip()
+                    if (self.min_word_length <= len(word_text) <= self.max_word_length and
+                            re.search(self.word_pattern, word_text)):
+                        words.append(WordInfo(
+                            text=word_text,
+                            x=x, y=y,
+                            width=width, height=height,
+                            confidence=conf_pct
+                        ))
         except Exception as e:
-            print(f"Error extracting words from OCR: {e}")
-            
+            print(f"Error extracting words from EasyOCR: {e}")
         return words
     
     def find_nearest_word(self, words: List[WordInfo], cursor_x: int, cursor_y: int) -> Optional[WordInfo]:
@@ -202,13 +193,8 @@ class WordTranslator:
             
             # Process with OCR
             try:
-                ocr_data = pytesseract.image_to_data(
-                    image, 
-                    lang=OCR_LANGS,
-                    config='--psm 6',
-                    output_type=pytesseract.Output.DICT
-                )
-                words = self.word_detector.extract_words_from_ocr(ocr_data)
+                results = READER.readtext(np.array(image))
+                words = self.word_detector.extract_words_from_easyocr(results)
                 
             except Exception as e:
                 return TranslationResult(
@@ -491,7 +477,8 @@ class Worker:
         
         # OCR
         try:
-            text = pytesseract.image_to_string(img, lang=OCR_LANGS).strip()
+            results = READER.readtext(np.array(img))
+            text = ' '.join(r[1] for r in results).strip()
         except Exception as e:
             text = f"OCR Error: {e}"
 
@@ -575,7 +562,8 @@ class SimpleApp(tk.Tk):
         self.text_widget.bind('<B1-Motion>', self.on_move)
         
         # Initial message
-        self.text_widget.insert(tk.END, "Press F8 for region translation, F9 for word translation, Ctrl+F12 to set custom trigger (keyboard/mouse/scroll)...")
+        lang_label = "FR→TR" if OCR_LANGS == "fra" else "EN→TR"
+        self.text_widget.insert(tk.END, f"[{lang_label}] F8=region, F9=word, Ctrl+F12=custom trigger, RClick=close")
         
         # Worker & controller
         self.worker = Worker(self._on_result)
@@ -671,6 +659,38 @@ class SimpleApp(tk.Tk):
         self.destroy()
 
 
+def pick_language():
+    """Standalone language picker — runs its own mainloop, sets OCR_LANGS global."""
+    global OCR_LANGS
+    picker = tk.Tk()
+    picker.title("Language")
+    picker.resizable(False, False)
+    picker.attributes('-topmost', True)
+    picker.update_idletasks()
+    w, h = 280, 100
+    x = (picker.winfo_screenwidth() - w) // 2
+    y = (picker.winfo_screenheight() - h) // 2
+    picker.geometry(f"{w}x{h}+{x}+{y}")
+
+    tk.Label(picker, text="Source language → Turkish", font=("Arial", 11)).pack(pady=8)
+    frame = tk.Frame(picker)
+    frame.pack()
+
+    def choose(ocr):
+        global OCR_LANGS
+        OCR_LANGS = ocr
+        picker.destroy()
+
+    tk.Button(frame, text="English", width=10, command=lambda: choose(['en'])).pack(side=tk.LEFT, padx=10)
+    tk.Button(frame, text="French",  width=10, command=lambda: choose(['fr'])).pack(side=tk.LEFT, padx=10)
+
+    picker.mainloop()
+
+
 if __name__ == "__main__":
+    pick_language()
+    print(f"Loading EasyOCR model for {OCR_LANGS} (GPU)...")
+    READER = easyocr.Reader(OCR_LANGS, gpu=True)
+    print("Model ready.")
     app = SimpleApp()
     app.mainloop()
