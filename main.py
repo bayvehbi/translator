@@ -52,6 +52,7 @@ TARGET_LANG_NAME = "Turkish"
 OCR_LANGS      = ['en']
 READER: easyocr.Reader = None
 USE_LLM        = CONFIG.get("use_llm", False)
+DETAILED_MODE  = CONFIG.get("detailed_mode", True)
 OPENAI_CLIENT: OpenAI = None
 OPENAI_MODEL   = CONFIG.get("openai_model", "gpt-4o-mini")
 
@@ -71,10 +72,11 @@ def word_by_word(text: str, translated: str = "") -> str:
                 return ""
             OPENAI_CLIENT = OpenAI(api_key=api_key)
         prompt = (
-            f"Sentence: \"{text}\"\n\n"
-            f"For each word in the sentence, give its {TARGET_LANG_NAME} meaning as used in this specific sentence (context-aware, not dictionary).\n"
-            f"Ignore word order differences. Output one line only, no extra text:\n"
-            f"word1→meaning1  word2→meaning2  word3→meaning3"
+            f"Source: \"{text}\"\n"
+            f"Translation: \"{translated}\"\n\n"
+            f"Map each source word to its {TARGET_LANG_NAME} equivalent as used in this sentence (context-aware). "
+            f"Keep the same word order as the source. Output one line only, no extra text:\n"
+            f"word1→anlam1  word2→anlam2  word3→anlam3"
         )
         try:
             response = OPENAI_CLIENT.chat.completions.create(
@@ -98,6 +100,39 @@ def word_by_word(text: str, translated: str = "") -> str:
             except Exception:
                 parts.append(clean)
         return '  '.join(parts)
+
+
+def get_tip(text: str, translated: str) -> str:
+    """Returns a short tip/trick in Turkish for the given text. Only called when DETAILED_MODE and USE_LLM."""
+    global OPENAI_CLIENT
+    if OPENAI_CLIENT is None:
+        api_key = CONFIG.get("openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            return ""
+        OPENAI_CLIENT = OpenAI(api_key=api_key)
+    is_single_word = len(text.split()) == 1
+    if is_single_word:
+        prompt = (
+            f"Kelime: \"{text}\" → Türkçe: \"{translated}\"\n"
+            f"Bu kelimeyi ezberlemeyi kolaylaştıran çok kısa bir ipucu yaz (Türkçe, 1-2 cümle max). "
+            f"Köken, hafıza tekniği veya ilginç bir bağlantı olabilir. Etiket kullanma."
+        )
+    else:
+        prompt = (
+            f"Metin: \"{text}\"\n"
+            f"Türkçe çevirisi: \"{translated}\"\n"
+            f"Bu metindeki dil yapısı veya kelimeler hakkında çok kısa bir trick/ipucu yaz (Türkçe, 1-2 cümle max). "
+            f"Kalıp, yaygın kullanım veya dil notu olabilir. Etiket kullanma."
+        )
+    try:
+        response = OPENAI_CLIENT.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.5,
+        )
+        return response.choices[0].message.content.strip()
+    except Exception:
+        return ""
 
 
 def translate(text: str) -> str:
@@ -574,6 +609,13 @@ class Worker:
                 literal = word_by_word(text, translated)
             except Exception:
                 literal = ""
+            if USE_LLM and DETAILED_MODE and literal:
+                try:
+                    tip = get_tip(text, translated)
+                    if tip:
+                        literal += f"\n{tip}"
+                except Exception:
+                    pass
         else:
             translated = "No text detected"
 
@@ -711,12 +753,23 @@ class SimpleApp(tk.Tk):
         self.text_widget.config(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
         if result.success:
-            result_text = f"{result.original_word} : {result.translated_word} ({result.confidence:.0f}%)"
+            wbw = word_by_word(result.original_word, result.translated_word) if USE_LLM else ""
+            tip = get_tip(result.original_word, result.translated_word) if (USE_LLM and DETAILED_MODE and wbw) else ""
+            if USE_LLM:
+                parts = [result.original_word, result.translated_word]
+                if wbw:
+                    parts.append(wbw)
+                if tip:
+                    parts.append(tip)
+                result_text = "\n".join(parts)
+            else:
+                result_text = f"{result.original_word} : {result.translated_word} ({result.confidence:.0f}%)"
             self._add_to_history(result.original_word.lower(), result.translated_word)
         else:
-            result_text = f"Word translation failed: {result.error_message}"
+            result_text = f"Kelime çevirilemedi: {result.error_message}"
         self.text_widget.insert(tk.END, result_text)
         self.text_widget.config(state=tk.DISABLED)
+        self.after(0, self._fit_translation)
 
     def _add_to_history(self, word: str, translation: str):
         """Add or increment a word in history, then refresh the display."""
