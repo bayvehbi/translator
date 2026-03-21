@@ -135,6 +135,37 @@ def get_tip(text: str, translated: str) -> str:
         return ""
 
 
+def fetch_all_word_meanings(sentence: str) -> dict:
+    """One LLM call: returns {word: meaning_in_Turkish} for every word in the sentence."""
+    global OPENAI_CLIENT
+    if OPENAI_CLIENT is None:
+        api_key = CONFIG.get("openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            return {}
+        OPENAI_CLIENT = OpenAI(api_key=api_key)
+    prompt = (
+        f"Cümle: \"{sentence}\"\n\n"
+        f"Bu cümledeki her kelime için bağlama uygun Türkçe anlamını ver. "
+        f"Her satıra tam olarak şu formatta yaz, başka hiçbir şey yazma:\n"
+        f"kelime: anlam\n\n"
+        f"Bağlaçlar ve edatlar dahil tüm kelimeleri yaz."
+    )
+    try:
+        response = OPENAI_CLIENT.chat.completions.create(
+            model=OPENAI_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0,
+        )
+        result = {}
+        for line in response.choices[0].message.content.strip().splitlines():
+            if ':' in line:
+                word, _, meaning = line.partition(':')
+                result[word.strip().lower()] = meaning.strip()
+        return result
+    except Exception:
+        return {}
+
+
 def translate(text: str) -> str:
     """Translate text to TARGET_LANG using the active backend."""
     if USE_LLM:
@@ -599,25 +630,27 @@ class Worker:
 
         # Translate
         translated = ""
-        literal = ""
         if text and not text.startswith("OCR Error"):
             try:
                 translated = self.clean_text(translate(text))
             except Exception as e:
                 translated = f"Translation Error: {e}"
+            literal = ""
             try:
                 literal = word_by_word(text, translated)
             except Exception:
-                literal = ""
-            if USE_LLM and DETAILED_MODE and literal:
+                pass
+            tip = ""
+            if USE_LLM and DETAILED_MODE:
                 try:
                     tip = get_tip(text, translated)
-                    if tip:
-                        literal += f"\n{tip}"
                 except Exception:
                     pass
+            if tip:
+                literal = f"{literal}\n{tip}" if literal else tip
         else:
             translated = "No text detected"
+            literal = ""
 
         self.ui_callback(text, translated, literal)
 
@@ -672,6 +705,18 @@ class SimpleApp(tk.Tk):
         self.history_frame = tk.Frame(self, bg="#000000")
         self.history_frame.pack(fill=tk.BOTH, expand=True)
 
+        # Clicked word meaning — shown above HISTORY label
+        self.word_meaning_label = tk.Label(
+            self.history_frame,
+            text="",
+            bg="#000000", fg="#ffdd55",
+            font=("Consolas", 13),
+            anchor="w",
+            wraplength=self.winfo_screenwidth() - 10,
+            justify=tk.LEFT,
+        )
+        self.word_meaning_label.pack(fill=tk.X, padx=5)
+
         tk.Label(
             self.history_frame,
             text="HISTORY",
@@ -696,10 +741,18 @@ class SimpleApp(tk.Tk):
         )
         self.history_widget.pack(fill=tk.BOTH, expand=True, padx=5, pady=2)
 
+        # Pre-fetched word meanings {word_lower: meaning}
+        self._word_meanings: dict = {}
+        self._current_original = ""
+        self._drag_started = False
+
         # Add drag functionality to all widgets
         for w in (self, self.text_widget, self.history_widget, self.history_frame):
             w.bind('<Button-1>', self.start_move)
             w.bind('<B1-Motion>', self.on_move)
+
+        # Word click on original text (line 1)
+        self.text_widget.bind('<ButtonRelease-1>', self._on_text_click)
 
         # Initial message
         lang_label = "FR→TR" if 'fr' in OCR_LANGS else "EN→TR"
@@ -722,8 +775,10 @@ class SimpleApp(tk.Tk):
     def start_move(self, event):
         self.x = event.x
         self.y = event.y
+        self._drag_started = False
 
     def on_move(self, event):
+        self._drag_started = True
         deltax = event.x - self.x
         deltay = event.y - self.y
         x = self.winfo_x() + deltax
@@ -749,21 +804,15 @@ class SimpleApp(tk.Tk):
         self._on_word_result(result)
 
     def _on_word_result(self, result: TranslationResult):
-        """Handle word translation result."""
+        """Handle word translation result (F9 cursor word)."""
         self.text_widget.config(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
         if result.success:
-            wbw = word_by_word(result.original_word, result.translated_word) if USE_LLM else ""
-            tip = get_tip(result.original_word, result.translated_word) if (USE_LLM and DETAILED_MODE and wbw) else ""
-            if USE_LLM:
-                parts = [result.original_word, result.translated_word]
-                if wbw:
-                    parts.append(wbw)
-                if tip:
-                    parts.append(tip)
-                result_text = "\n".join(parts)
-            else:
-                result_text = f"{result.original_word} : {result.translated_word} ({result.confidence:.0f}%)"
+            tip = get_tip(result.original_word, result.translated_word) if (USE_LLM and DETAILED_MODE) else ""
+            parts = [result.original_word, result.translated_word]
+            if tip:
+                parts.append(tip)
+            result_text = "\n".join(parts)
             self._add_to_history(result.original_word.lower(), result.translated_word)
         else:
             result_text = f"Kelime çevirilemedi: {result.error_message}"
@@ -832,21 +881,48 @@ class SimpleApp(tk.Tk):
         y = self.winfo_y()
         self.geometry(f"{w}x{h}+{x}+{y}")
 
+    def _on_text_click(self, event):
+        """Show pre-fetched meaning of clicked word (line 1 = original text)."""
+        if self._drag_started or not self._current_original:
+            return
+        try:
+            idx = self.text_widget.index(f"@{event.x},{event.y}")
+            if int(idx.split('.')[0]) != 1:
+                return
+            self.text_widget.config(state=tk.NORMAL)
+            word = self.text_widget.get(
+                self.text_widget.index(f"{idx} wordstart"),
+                self.text_widget.index(f"{idx} wordend"),
+            ).strip()
+            self.text_widget.config(state=tk.DISABLED)
+            word_clean = re.sub(r"[^a-zA-ZÀ-ÿ\u00C0-\u024F']", "", word)
+            if not word_clean:
+                return
+            meaning = self._word_meanings.get(word_clean.lower(), "")
+            self.word_meaning_label.config(text=f"{word_clean} — {meaning}" if meaning else word_clean)
+        except Exception:
+            pass
+
     def _on_result(self, original: str, translated: str, literal: str = ""):
+        self._current_original = original or ""
+        self._word_meanings = {}
+        self.word_meaning_label.config(text="")
         self.text_widget.config(state=tk.NORMAL)
         self.text_widget.delete("1.0", tk.END)
-
         line1 = original or "(no text detected)"
         line2 = translated or "(translation failed)"
-        line3 = literal or ""
-
         result = f"{line1}\n{line2}"
-        if line3:
-            result += f"\n{line3}"
-
+        if literal:
+            result += f"\n{literal}"
         self.text_widget.insert(tk.END, result)
         self.text_widget.config(state=tk.DISABLED)
         self.after(0, self._fit_translation)
+        if USE_LLM and original:
+            threading.Thread(target=self._prefetch_meanings, args=(original,), daemon=True).start()
+
+    def _prefetch_meanings(self, sentence: str):
+        meanings = fetch_all_word_meanings(sentence)
+        self._word_meanings = meanings
 
     def _on_close(self, event=None):
         try:
