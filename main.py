@@ -26,6 +26,7 @@ import json
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
+import tempfile
 import tkinter as tk
 import numpy as np
 from PIL import Image, ImageGrab
@@ -34,6 +35,13 @@ import easyocr
 from pynput import mouse, keyboard
 from deep_translator import GoogleTranslator
 from openai import OpenAI
+try:
+    from gtts import gTTS
+    import pygame
+    pygame.mixer.init()
+    TTS_AVAILABLE = True
+except Exception:
+    TTS_AVAILABLE = False
 
 
 # ---------------- Configuration ---------------- #
@@ -55,6 +63,27 @@ USE_LLM        = CONFIG.get("use_llm", False)
 DETAILED_MODE  = CONFIG.get("detailed_mode", True)
 OPENAI_CLIENT: OpenAI = None
 OPENAI_MODEL   = CONFIG.get("openai_model", "gpt-4o-mini")
+
+
+def speak(text: str):
+    """Play TTS audio for the given text using the source language."""
+    if not TTS_AVAILABLE or not text:
+        return
+    lang = 'fr' if 'fr' in OCR_LANGS else 'en'
+    def _play():
+        try:
+            tts = gTTS(text=text, lang=lang, slow=False)
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                tmp_path = f.name
+                tts.write_to_fp(f)
+            pygame.mixer.music.load(tmp_path)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                pygame.time.wait(50)
+            os.remove(tmp_path)
+        except Exception as e:
+            print(f"TTS error: {e}")
+    threading.Thread(target=_play, daemon=True).start()
 
 
 def word_by_word(text: str, translated: str = "") -> str:
@@ -473,6 +502,14 @@ class CaptureController:
         x, y = win32gui.GetCursorPos()
         threading.Thread(target=self.on_word_translate, args=(x, y), daemon=True).start()
 
+    def _do_fullscreen(self):
+        import tkinter as tk
+        root = tk.Tk()
+        w, h = root.winfo_screenwidth(), root.winfo_screenheight()
+        root.destroy()
+        sel = Selection(0, 0, w, h)
+        threading.Thread(target=self.on_region_ready, args=(sel,), daemon=True).start()
+
     def _capture_key(self, key_val):
         """Assign key_val to the current waiting mode and notify."""
         mode = self._waiting_mode
@@ -519,6 +556,11 @@ class CaptureController:
             word_trigger = self._custom_word_key or keyboard.Key.f9
             if key == word_trigger:
                 self._do_word()
+                return True
+
+            # F10 → full screen
+            if key == keyboard.Key.f10:
+                self._do_fullscreen()
                 return True
 
         except Exception:
@@ -680,6 +722,19 @@ class SimpleApp(tk.Tk):
         # ---- top frame: current translation ----
         self.frame = tk.Frame(self, bg="#000000")
         self.frame.pack(fill=tk.BOTH)
+
+        self.play_btn = tk.Label(
+            self.frame,
+            text="▶",
+            bg="#000000", fg="#555555",
+            font=("Consolas", 18, "bold"),
+            cursor="hand2",
+            padx=4,
+        )
+        self.play_btn.pack(side=tk.RIGHT, anchor="n")
+        self.play_btn.bind("<Button-1>", lambda e: speak(self._current_original))
+        self.play_btn.bind("<Enter>", lambda e: self.play_btn.config(fg="#ffffff"))
+        self.play_btn.bind("<Leave>", lambda e: self.play_btn.config(fg="#555555"))
 
         self.text_widget = tk.Text(
             self.frame,
@@ -900,6 +955,7 @@ class SimpleApp(tk.Tk):
                 return
             meaning = self._word_meanings.get(word_clean.lower(), "")
             self.word_meaning_label.config(text=f"{word_clean} — {meaning}" if meaning else word_clean)
+            speak(word_clean)
         except Exception:
             pass
 

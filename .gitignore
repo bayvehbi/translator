@@ -54,6 +54,9 @@ Thumbs.db
 # Config with secrets
 config.json
 
+# Claude
+CLAUDE.md
+
 # Debug files
 debug_captures/
 *.log
