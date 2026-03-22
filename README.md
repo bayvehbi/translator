@@ -1,184 +1,98 @@
-# 🖥️ OCR Translator
+# OCR Translator
 
-A lightweight, always-on-top screen OCR and translation tool that captures text from any part of your screen and translates it in real-time.
+OCR-based language learning overlay for Windows. Captures any region of your screen, reads the text, and shows the translation + word-by-word breakdown in an always-on-top overlay. Designed for reading French or English content while learning.
 
 ![Python](https://img.shields.io/badge/python-3.11+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Windows-lightgrey.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-## ✨ Features
+## Features
 
-- **🎯 Screen OCR**: Capture text from any region of your screen with simple click-and-drag
-- **🔤 Word Translation**: Translate individual words at cursor position with smart detection
-- **🌍 Real-time Translation**: Instant translation to Turkish (easily configurable for other languages)
-- **🔝 Always on Top**: Translucent window that stays above all other applications
-- **🎮 Custom Triggers**: Set any keyboard key, mouse button, or scroll as translation trigger
-- **🧹 Smart Text Cleaning**: Automatically removes newlines and optimizes spacing
-- **📱 Multi-line Display**: Intelligent text wrapping with scrolling support
-- **⚡ Lightweight**: Minimal resource usage with fast performance
-- **🎯 Smart Word Detection**: Intelligent region capture and nearest word finding
+- **Screen region capture** — F8 to select a region, F10 for full screen
+- **Word at cursor** — F9 translates the nearest word to your cursor
+- **Two translation backends** — Google Translate or OpenAI LLM (toggle with Ctrl+L)
+- **Word-by-word breakdown** — follows the original sentence structure
+- **Clickable words** — click any word in the original text to see its context-aware meaning (pre-fetched, no extra API call on click)
+- **Pronunciation** — click a word to hear it, or press ▶ to read the full sentence (gTTS)
+- **Tips & tricks** — short language learning notes per scan (toggleable via `detailed_mode` in config)
+- **Word history** — panel below the overlay sorted by lookup frequency
+- **Configurable languages** — choose source (FR/EN) and target (EN/TR) on startup
+- **Custom triggers** — remap F8/F9 to any key, mouse button, or scroll (Ctrl+F8 / Ctrl+F9)
+- **Always-on-top** — translucent overlay, draggable, right-click to close
 
-## 🚀 Quick Start
+## Quick Start
 
-### Option 1: Download Executable (Recommended)
-1. Download `OCR_Translator.exe` from the [Releases](https://github.com/yourusername/ocr-translator/releases) page
-2. Double-click to run (no installation required)
-3. Press `F8` at top-left corner, then `F8` at bottom-right corner to capture text
+### Run from Source
 
-### Option 2: Run from Source
-1. Clone the repository:
+1. Clone and install dependencies:
    ```bash
    git clone https://github.com/yourusername/ocr-translator.git
    cd ocr-translator
-   ```
-
-2. Install dependencies:
-   ```bash
    pip install -r requirements.txt
    ```
 
-3. Install Tesseract OCR:
-   ```bash
-   winget install UB-Mannheim.TesseractOCR
-   ```
-
-4. Run the application:
+2. Run:
    ```bash
    python main.py
    ```
 
-## 🎮 How to Use
+3. On startup, select your source and target language, then use the keys below.
 
-### Region Translation (Original Feature)
-1. **Launch** the application
-2. **Capture text**: 
-   - Press `F8` at the top-left corner of the text you want to capture
-   - Press `F8` again at the bottom-right corner of the text
-   - Translation appears automatically
+## Controls
 
-### Word Translation (New Feature)
-1. **Set custom trigger** (optional):
-   - Press `Ctrl+F12` to activate trigger setup mode
-   - Press any keyboard key, mouse button, or scroll to set as trigger
-   - Your chosen input becomes the new translation trigger
-2. **Translate words**:
-   - Move cursor to any word on screen
-   - Press `F9` (or your custom trigger) to translate the nearest word
-   - Result shows: `"word : translation (confidence%)"`
+| Key | Action |
+|-----|--------|
+| `F8` | Set region corners (press twice: top-left, then bottom-right) |
+| `F9` | Translate word at cursor |
+| `F10` | Capture and translate full screen |
+| `Ctrl+L` | Toggle translation backend (LLM / Google) |
+| `Ctrl+F8` | Remap region trigger to any key/mouse/scroll |
+| `Ctrl+F9` | Remap word trigger to any key/mouse/scroll |
+| `Right-click` | Close the application |
 
-### Controls
-- **`F8` (first press)**: Set top-left corner of capture area
-- **`F8` (second press)**: Set bottom-right corner of capture area
-- **`F9`**: Translate word at cursor position (if no custom trigger set)
-- **`Ctrl+F12`**: Set custom translation trigger (keyboard/mouse/scroll)
-- **Right-click**: Close the application
-- **Ctrl+Q**: Close the application
-- **Mouse wheel**: Scroll through long text
-- **Drag window**: Click and drag the window to move it
+## Configuration
 
-## ⚙️ Configuration
+Edit `config.json` next to the executable:
 
-Edit `main.py` to customize:
-
-```python
-# Translation settings
-TARGET_LANG = "tr"           # Target language (tr=Turkish, en=English, etc.)
-OCR_LANGS   = "eng"          # OCR language (eng=English, tur=Turkish, etc.)
-
-# Tesseract path (adjust if needed)
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+```json
+{
+  "openai_api_key": "sk-...",
+  "openai_model": "gpt-4o-mini",
+  "use_llm": true,
+  "detailed_mode": true
+}
 ```
 
-## 🛠️ Building from Source
+| Key | Description |
+|-----|-------------|
+| `use_llm` | Use OpenAI instead of Google Translate |
+| `detailed_mode` | Show tips & tricks section (requires `use_llm`) |
+| `openai_model` | Any OpenAI chat model |
 
-To create your own executable:
+## Building
 
-1. Install PyInstaller:
-   ```bash
-   pip install pyinstaller
-   ```
+```bash
+pip install pyinstaller
+pyinstaller --onefile --noconsole main.py
+```
 
-2. Build the executable:
-   ```bash
-   pyinstaller translator.spec
-   ```
+## Requirements
 
-3. Find your executable in the `dist/` folder
+- Windows 10/11
+- Python 3.11+
+- Internet connection (for translation and TTS)
+- OpenAI API key (optional, for LLM mode)
 
-## 📋 Requirements
+## Dependencies
 
-- **Windows 10/11**
-- **Tesseract OCR** (installed automatically with winget)
-- **Internet connection** (for translation)
-- **Python 3.11+** (if running from source)
+- `easyocr` — OCR engine
+- `deep-translator` — Google Translate backend
+- `openai` — LLM translation backend
+- `gtts` + `pygame` — text-to-speech pronunciation
+- `mss` + `pillow` — screen capture
+- `pynput` — global keyboard/mouse input
+- `tkinter` — GUI (included with Python)
 
-## 🔧 Dependencies
+## License
 
-- `mss` - Fast screen capture
-- `pillow` - Image processing
-- `pytesseract` - OCR engine
-- `pynput` - Global keyboard/mouse input
-- `deep-translator` - Translation service
-- `tkinter` - GUI framework (included with Python)
-
-## 🎨 Screenshots
-
-*Coming soon - screenshots of the application in action*
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙏 Acknowledgments
-
-- [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for text recognition
-- [Google Translate](https://translate.google.com/) for translation services
-- [PyInstaller](https://www.pyinstaller.org/) for creating standalone executables
-
-## 📞 Support
-
-If you encounter any issues or have questions:
-
-1. Check the [Issues](https://github.com/yourusername/ocr-translator/issues) page
-2. Create a new issue with detailed information
-3. Include your Windows version and any error messages
-
-## 🔄 Changelog
-
-### v2.0.0 - Word Translation & Custom Triggers
-- **🔤 Word Translation**: New F9 key to translate individual words at cursor position
-- **🎯 Smart Word Detection**: Intelligent region capture and nearest word finding algorithm
-- **🎮 Custom Triggers**: Set any keyboard key, mouse button, or scroll as translation trigger
-- **⌨️ Ctrl+F12 Setup**: Easy trigger configuration with input counting
-- **🖱️ Mouse Support**: Left/right/middle clicks and scroll up/down as triggers
-- **📊 Input Counting**: Real-time feedback during trigger setup
-- **🧹 Clean Code**: Removed all debug code for better performance
-
-### v1.1.0
-- **F8 cursor-based selection**: Press F8 at top-left, then F8 at bottom-right corner
-- **Improved text visibility**: Brighter white text with better contrast
-- **Invisible scrollbar**: Clean UI without visible scrollbar but maintains scrolling
-- **Enhanced transparency**: 80% opaque window for better readability
-
-### v1.0.0
-- Initial release
-- Screen OCR with Tesseract
-- Real-time translation
-- Always-on-top translucent window
-- Smart text cleaning and formatting
-- Multi-line display with scrolling
-- Standalone executable support
-
----
-
-**Made with ❤️ for easy screen text translation**
+MIT
