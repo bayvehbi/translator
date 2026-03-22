@@ -132,7 +132,7 @@ def word_by_word(text: str, translated: str = "") -> str:
 
 
 def get_tip(text: str, translated: str) -> str:
-    """Returns a short tip/trick in Turkish for the given text. Only called when DETAILED_MODE and USE_LLM."""
+    """Returns a short tip/trick in the target language. Only called when DETAILED_MODE and USE_LLM."""
     global OPENAI_CLIENT
     if OPENAI_CLIENT is None:
         api_key = CONFIG.get("openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
@@ -142,16 +142,16 @@ def get_tip(text: str, translated: str) -> str:
     is_single_word = len(text.split()) == 1
     if is_single_word:
         prompt = (
-            f"Kelime: \"{text}\" → Türkçe: \"{translated}\"\n"
-            f"Bu kelimeyi ezberlemeyi kolaylaştıran çok kısa bir ipucu yaz (Türkçe, 1-2 cümle max). "
-            f"Köken, hafıza tekniği veya ilginç bir bağlantı olabilir. Etiket kullanma."
+            f"Word: \"{text}\" → {TARGET_LANG_NAME}: \"{translated}\"\n"
+            f"Write a very short tip to help remember this word (in {TARGET_LANG_NAME}, 1-2 sentences max). "
+            f"Can be etymology, memory trick, or an interesting connection. No labels."
         )
     else:
         prompt = (
-            f"Metin: \"{text}\"\n"
-            f"Türkçe çevirisi: \"{translated}\"\n"
-            f"Bu metindeki dil yapısı veya kelimeler hakkında çok kısa bir trick/ipucu yaz (Türkçe, 1-2 cümle max). "
-            f"Kalıp, yaygın kullanım veya dil notu olabilir. Etiket kullanma."
+            f"Text: \"{text}\"\n"
+            f"{TARGET_LANG_NAME} translation: \"{translated}\"\n"
+            f"Write a very short language tip or trick about this text (in {TARGET_LANG_NAME}, 1-2 sentences max). "
+            f"Can be a pattern, common usage, or grammar note. No labels."
         )
     try:
         response = OPENAI_CLIENT.chat.completions.create(
@@ -165,7 +165,7 @@ def get_tip(text: str, translated: str) -> str:
 
 
 def fetch_all_word_meanings(sentence: str) -> dict:
-    """One LLM call: returns {word: meaning_in_Turkish} for every word in the sentence."""
+    """One LLM call: returns {word: meaning_in_target_lang} for every word in the sentence."""
     global OPENAI_CLIENT
     if OPENAI_CLIENT is None:
         api_key = CONFIG.get("openai_api_key", "") or os.environ.get("OPENAI_API_KEY", "")
@@ -173,11 +173,11 @@ def fetch_all_word_meanings(sentence: str) -> dict:
             return {}
         OPENAI_CLIENT = OpenAI(api_key=api_key)
     prompt = (
-        f"Cümle: \"{sentence}\"\n\n"
-        f"Bu cümledeki her kelime için bağlama uygun Türkçe anlamını ver. "
-        f"Her satıra tam olarak şu formatta yaz, başka hiçbir şey yazma:\n"
-        f"kelime: anlam\n\n"
-        f"Bağlaçlar ve edatlar dahil tüm kelimeleri yaz."
+        f"Sentence: \"{sentence}\"\n\n"
+        f"For each word in this sentence, give its context-aware {TARGET_LANG_NAME} meaning. "
+        f"Write exactly in this format, nothing else:\n"
+        f"word: meaning\n\n"
+        f"Include all words: conjunctions, prepositions, articles, etc."
     )
     try:
         response = OPENAI_CLIENT.chat.completions.create(
@@ -810,7 +810,8 @@ class SimpleApp(tk.Tk):
         self.text_widget.bind('<ButtonRelease-1>', self._on_text_click)
 
         # Initial message
-        lang_label = "FR→TR" if 'fr' in OCR_LANGS else "EN→TR"
+        src_label = "FR" if 'fr' in OCR_LANGS else "EN"
+        lang_label = f"{src_label}→{TARGET_LANG.upper()}"
         self.text_widget.config(state=tk.NORMAL)
         backend = "LLM" if USE_LLM else "Google"
         self.text_widget.insert(tk.END, f"[{lang_label}] [{backend}] F8=region  F9=word  Ctrl+F8=remap region  Ctrl+F9=remap word  Ctrl+L=toggle translation(LLM/Google)  RClick=close")
@@ -989,30 +990,44 @@ class SimpleApp(tk.Tk):
 
 
 def pick_language():
-    """Standalone language picker — runs its own mainloop, sets OCR_LANGS global."""
-    global OCR_LANGS
+    """Standalone language picker — sets OCR_LANGS, TARGET_LANG, TARGET_LANG_NAME globals."""
+    global OCR_LANGS, TARGET_LANG, TARGET_LANG_NAME
     picker = tk.Tk()
     picker.title("Language")
     picker.resizable(False, False)
     picker.attributes('-topmost', True)
     picker.update_idletasks()
-    w, h = 280, 100
+    w, h = 320, 160
     x = (picker.winfo_screenwidth() - w) // 2
     y = (picker.winfo_screenheight() - h) // 2
     picker.geometry(f"{w}x{h}+{x}+{y}")
 
-    tk.Label(picker, text="Source language → Turkish", font=("Arial", 11)).pack(pady=8)
-    frame = tk.Frame(picker)
-    frame.pack()
+    tk.Label(picker, text="Source language", font=("Arial", 11, "bold")).pack(pady=(10, 2))
+    src_frame = tk.Frame(picker)
+    src_frame.pack()
 
-    def choose(ocr):
-        global OCR_LANGS
-        OCR_LANGS = ocr
+    src_var = tk.StringVar(value="fr")
+    tk.Radiobutton(src_frame, text="French", variable=src_var, value="fr").pack(side=tk.LEFT, padx=10)
+    tk.Radiobutton(src_frame, text="English", variable=src_var, value="en").pack(side=tk.LEFT, padx=10)
+
+    tk.Label(picker, text="Target language", font=("Arial", 11, "bold")).pack(pady=(10, 2))
+    tgt_frame = tk.Frame(picker)
+    tgt_frame.pack()
+
+    tgt_var = tk.StringVar(value="en")
+    tk.Radiobutton(tgt_frame, text="English", variable=tgt_var, value="en").pack(side=tk.LEFT, padx=10)
+    tk.Radiobutton(tgt_frame, text="Turkish", variable=tgt_var, value="tr").pack(side=tk.LEFT, padx=10)
+
+    def choose():
+        global OCR_LANGS, TARGET_LANG, TARGET_LANG_NAME
+        src = src_var.get()
+        tgt = tgt_var.get()
+        OCR_LANGS = ['fr', 'en'] if src == 'fr' else ['en']
+        TARGET_LANG = tgt
+        TARGET_LANG_NAME = {"en": "English", "tr": "Turkish"}.get(tgt, tgt)
         picker.destroy()
 
-    tk.Button(frame, text="English", width=10, command=lambda: choose(['en'])).pack(side=tk.LEFT, padx=10)
-    tk.Button(frame, text="French",  width=10, command=lambda: choose(['fr', 'en'])).pack(side=tk.LEFT, padx=10)
-
+    tk.Button(picker, text="Start", width=12, command=choose).pack(pady=10)
     picker.mainloop()
 
 
