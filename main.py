@@ -811,6 +811,9 @@ class SimpleApp(tk.Tk):
         # Word click on original text (line 1)
         self.text_widget.bind('<ButtonRelease-1>', self._on_text_click)
 
+        # Click on history widget to hear pronunciation
+        self.history_widget.bind('<ButtonRelease-1>', self._on_history_click)
+
         # * saves selected word, - removes it
         self.bind('<asterisk>', self._save_selected_to_history)
         self.bind('<minus>', self._remove_selected_from_history)
@@ -976,6 +979,19 @@ class SimpleApp(tk.Tk):
         x = self.winfo_x()
         y = self.winfo_y()
         self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_history_click(self, event):
+        """Speak the word clicked in the history panel."""
+        try:
+            idx = self.history_widget.index(f"@{event.x},{event.y}")
+            line_start = self.history_widget.index(f"{idx} linestart")
+            line_text = self.history_widget.get(line_start, f"{idx} lineend").strip()
+            # line format: "* word → meaning  Nx" or "word → meaning  Nx"
+            word = line_text.lstrip("* ").split("→")[0].strip()
+            if word:
+                speak(word)
+        except Exception:
+            pass
 
     def _on_text_click(self, event):
         """Show pre-fetched meaning of clicked word (line 1 = original text)."""
