@@ -716,8 +716,9 @@ class SimpleApp(tk.Tk):
         self.resizable(True, False)
         self.update_idletasks()
 
-        # Word history: {word: {"translation": str, "count": int}}
-        self.word_history: dict = {}
+        # Word history: {word: {"translation": str, "count": int, "starred": bool}}
+        self._history_path = os.path.join(os.path.dirname(__file__), "history.json")
+        self.word_history: dict = self._load_history()
 
         # ---- top frame: current translation ----
         self.frame = tk.Frame(self, bg="#000000")
@@ -800,6 +801,7 @@ class SimpleApp(tk.Tk):
         self._word_meanings: dict = {}
         self._current_original = ""
         self._drag_started = False
+        self._selected_word: tuple = None  # (word, meaning)
 
         # Add drag functionality to all widgets
         for w in (self, self.text_widget, self.history_widget, self.history_frame):
@@ -808,6 +810,10 @@ class SimpleApp(tk.Tk):
 
         # Word click on original text (line 1)
         self.text_widget.bind('<ButtonRelease-1>', self._on_text_click)
+
+        # * saves selected word, - removes it
+        self.bind('<asterisk>', self._save_selected_to_history)
+        self.bind('<minus>', self._remove_selected_from_history)
 
         # Initial message
         src_label = "FR" if 'fr' in OCR_LANGS else "EN"
@@ -827,6 +833,10 @@ class SimpleApp(tk.Tk):
             w.bind('<Button-3>', self._on_close)
         self.bind('<Control-q>', self._on_close)
         self.bind('<Control-l>', self._toggle_llm)
+
+        # Display persisted history
+        if self.word_history:
+            self._refresh_history()
 
     def start_move(self, event):
         self.x = event.x
@@ -869,19 +879,48 @@ class SimpleApp(tk.Tk):
             if tip:
                 parts.append(tip)
             result_text = "\n".join(parts)
-            self._add_to_history(result.original_word.lower(), result.translated_word)
+
         else:
             result_text = f"Kelime çevirilemedi: {result.error_message}"
         self.text_widget.insert(tk.END, result_text)
         self.text_widget.config(state=tk.DISABLED)
         self.after(0, self._fit_translation)
 
-    def _add_to_history(self, word: str, translation: str):
+    def _load_history(self) -> dict:
+        try:
+            with open(self._history_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_history(self):
+        try:
+            with open(self._history_path, "w", encoding="utf-8") as f:
+                json.dump(self.word_history, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+    def _save_selected_to_history(self, event=None):
+        if self._selected_word:
+            word, meaning = self._selected_word
+            if word.lower() not in self.word_history:
+                self._add_to_history(word.lower(), meaning, starred=True)
+
+    def _remove_selected_from_history(self, event=None):
+        if self._selected_word:
+            word = self._selected_word[0].lower()
+            if word in self.word_history:
+                del self.word_history[word]
+                self._save_history()
+                self._refresh_history()
+
+    def _add_to_history(self, word: str, translation: str, starred: bool = False):
         """Add or increment a word in history, then refresh the display."""
         if word in self.word_history:
             self.word_history[word]["count"] += 1
         else:
-            self.word_history[word] = {"translation": translation, "count": 1}
+            self.word_history[word] = {"translation": translation, "count": 1, "starred": starred}
+        self._save_history()
         self._refresh_history()
 
     def _refresh_history(self):
@@ -897,7 +936,8 @@ class SimpleApp(tk.Tk):
             count = data["count"]
             translation = data["translation"]
             times = f"{count}x" if count > 1 else ""
-            line = f"{word} → {translation}  {times}\n"
+            star = "* " if data.get("starred") else ""
+            line = f"{star}{word} → {translation}  {times}\n"
             self.history_widget.insert(tk.END, line)
         self.history_widget.config(state=tk.DISABLED)
 
@@ -955,6 +995,7 @@ class SimpleApp(tk.Tk):
             if not word_clean:
                 return
             meaning = self._word_meanings.get(word_clean.lower(), "")
+            self._selected_word = (word_clean, meaning)
             self.word_meaning_label.config(text=f"{word_clean} — {meaning}" if meaning else word_clean)
             speak(word_clean)
         except Exception:

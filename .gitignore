@@ -54,6 +54,9 @@ Thumbs.db
 # Config with secrets
 config.json
 
+# User data
+history.json
+
 # Claude
 CLAUDE.md
 
