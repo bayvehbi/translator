@@ -933,14 +933,25 @@ class SimpleApp(tk.Tk):
             key=lambda item: item[1]["count"],
             reverse=True,
         )
-        self.history_widget.config(state=tk.NORMAL)
-        self.history_widget.delete("1.0", tk.END)
+        entries = []
         for word, data in sorted_words:
             count = data["count"]
             translation = data["translation"]
-            times = f"{count}x" if count > 1 else ""
+            times = f" {count}x" if count > 1 else ""
             star = "* " if data.get("starred") else ""
-            line = f"{star}{word} → {translation}  {times}\n"
+            entries.append(f"{star}{word} → {translation}{times}")
+
+        # fit columns based on window width and font (Consolas 13 ≈ 8px/char)
+        win_width = self.winfo_width() or self.winfo_screenwidth()
+        char_width = 8
+        col_width = max((len(e) for e in entries), default=20) + 4
+        cols = max(1, win_width // (col_width * char_width))
+
+        self.history_widget.config(state=tk.NORMAL)
+        self.history_widget.delete("1.0", tk.END)
+        for i in range(0, len(entries), cols):
+            row = entries[i:i + cols]
+            line = "  ".join(e.ljust(col_width) for e in row) + "\n"
             self.history_widget.insert(tk.END, line)
         self.history_widget.config(state=tk.DISABLED)
 
@@ -984,10 +995,22 @@ class SimpleApp(tk.Tk):
         """Speak the word clicked in the history panel."""
         try:
             idx = self.history_widget.index(f"@{event.x},{event.y}")
+            col = int(idx.split('.')[1])
             line_start = self.history_widget.index(f"{idx} linestart")
-            line_text = self.history_widget.get(line_start, f"{idx} lineend").strip()
-            # line format: "* word → meaning  Nx" or "word → meaning  Nx"
-            word = line_text.lstrip("* ").split("→")[0].strip()
+            line_text = self.history_widget.get(line_start, f"{idx} lineend")
+            # find which column-entry the click landed in by splitting on 2+ spaces
+            import re as _re
+            segments = _re.split(r'  +', line_text)
+            char_pos = 0
+            entry = ""
+            for seg in segments:
+                if char_pos <= col < char_pos + len(seg) + 2:
+                    entry = seg.strip()
+                    break
+                char_pos += len(seg) + 2
+            if not entry:
+                entry = segments[0].strip()
+            word = entry.lstrip("* ").split("→")[0].strip()
             if word:
                 speak(word)
         except Exception:
