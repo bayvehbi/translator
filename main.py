@@ -935,7 +935,7 @@ class SimpleApp(tk.Tk):
         entries = []
         for word, data in sorted_words:
             count = data["count"]
-            translation = data["translation"]
+            translation = re.sub(r'\s*\(.*?\)', '', data["translation"]).strip()
             times = f" {count}x" if count > 1 else ""
             star = "* " if data.get("starred") else ""
             entries.append(f"{star}{word} → {translation}{times}")
