@@ -947,10 +947,12 @@ class SimpleApp(tk.Tk):
         cols = max(1, win_width // (col_width * char_width))
         self._history_col_width = col_width
 
+        import math
+        rows = math.ceil(len(entries) / cols) if entries else 0
         self.history_widget.config(state=tk.NORMAL)
         self.history_widget.delete("1.0", tk.END)
-        for i in range(0, len(entries), cols):
-            row = entries[i:i + cols]
+        for r in range(rows):
+            row = [entries[r + c * rows] for c in range(cols) if r + c * rows < len(entries)]
             line = "  ".join(e.ljust(col_width) for e in row) + "\n"
             self.history_widget.insert(tk.END, line)
         self.history_widget.config(state=tk.DISABLED)
