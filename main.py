@@ -928,17 +928,18 @@ class SimpleApp(tk.Tk):
 
     def _refresh_history(self):
         """Redraw the history widget sorted alphabetically by word."""
-        sorted_words = sorted(
-            self.word_history.items(),
-            key=lambda item: item[0].lower(),
-        )
+        import unicodedata as _ud
+        def _sort_key(item):
+            return _ud.normalize('NFD', item[0].lower()).encode('ascii', 'ignore').decode('ascii')
+        sorted_words = sorted(self.word_history.items(), key=_sort_key)
         entries = []
         for word, data in sorted_words:
             count = data["count"]
             translation = re.sub(r'\s*\(.*?\)', '', data["translation"]).strip()
             times = f" {count}x" if count > 1 else ""
             star = "* " if data.get("starred") else ""
-            entry = f"{star}{word} → {translation}{times}"
+            import unicodedata as _ud
+            entry = _ud.normalize('NFC', f"{star}{word} → {translation}{times}")
             entries.append(entry[:28] + ".." if len(entry) > 30 else entry)
 
         # col_width is fixed at 30 chars so cols never changes as entries are
@@ -946,7 +947,7 @@ class SimpleApp(tk.Tk):
         win_width = self.winfo_width() or self.winfo_screenwidth()
         char_width = 8
         col_width = 30
-        cols = max(1, win_width // (col_width * char_width))
+        cols = max(1, win_width // ((col_width + 2) * char_width))
         self._history_col_width = col_width
 
         import math
