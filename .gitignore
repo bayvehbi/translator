@@ -67,3 +67,7 @@ debug_captures/
 # Temporary files
 *.tmp
 *.temp
+
+# Local scripts
+create_shortcut.ps1
+run.bat
