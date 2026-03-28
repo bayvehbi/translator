@@ -927,11 +927,10 @@ class SimpleApp(tk.Tk):
         self._refresh_history()
 
     def _refresh_history(self):
-        """Redraw the history widget sorted by search count."""
+        """Redraw the history widget sorted alphabetically by word."""
         sorted_words = sorted(
             self.word_history.items(),
-            key=lambda item: item[1]["count"],
-            reverse=True,
+            key=lambda item: item[0].lower(),
         )
         entries = []
         for word, data in sorted_words:
