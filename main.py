@@ -938,12 +938,14 @@ class SimpleApp(tk.Tk):
             translation = re.sub(r'\s*\(.*?\)', '', data["translation"]).strip()
             times = f" {count}x" if count > 1 else ""
             star = "* " if data.get("starred") else ""
-            entries.append(f"{star}{word} → {translation}{times}")
+            entry = f"{star}{word} → {translation}{times}"
+            entries.append(entry[:28] + ".." if len(entry) > 30 else entry)
 
-        # fit columns based on window width and font (Consolas 13 ≈ 8px/char)
+        # col_width is fixed at 30 chars so cols never changes as entries are
+        # added/removed — prevents the grid from reshuffling on every insert
         win_width = self.winfo_width() or self.winfo_screenwidth()
         char_width = 8
-        col_width = max((len(e) for e in entries), default=20) + 4
+        col_width = 30
         cols = max(1, win_width // (col_width * char_width))
         self._history_col_width = col_width
 
@@ -1009,6 +1011,7 @@ class SimpleApp(tk.Tk):
                 entry = line_text[:col_width].strip()
             word = entry.lstrip("* ").split("→")[0].strip()
             if word:
+                self._selected_word = (word, "")
                 speak(word)
         except Exception:
             pass
